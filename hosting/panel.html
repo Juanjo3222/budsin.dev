@@ -95,6 +95,10 @@ function histDetail(h) {
     const m = d.match(/^(\w+) hasta (\S+)$/);
     if (m) return `${m[1]} ${t("ev.until", { date: when(m[2]) })}`;
   }
+  if (h.event === "strike" || h.event === "strike_removed") {
+    const m = d.match(/→ (\d+)\/(\d+)(?: · (.*?))? · por /);
+    if (m) return `${m[1]}/${m[2]}${m[3] ? " · " + m[3] : ""}`;
+  }
   return h.event === "delete_site" || h.event === "register" ? d : "";
 }
 
@@ -103,7 +107,11 @@ function render() {
   const on = me.state === "on";
   const st = me.storage;
   const banners = [];
-  if (me.banned) banners.push(alertBox("err", t("ban.banned")));
+  if (me.banned) {
+    const kind = { soft: t("ban.soft"), perm: t("ban.perm") }[me.banKind] || (me.banKind === "temp" ? t("ban.temp", { date: when(me.banUntil) }) : t("ban.banned"));
+    banners.push(alertBox("err", kind + (me.banReason ? t("ban.reason", { reason: me.banReason }) : "") + t("ban.contact")));
+  }
+  if (me.strikes > 0 && !(me.banned && me.banKind === "perm")) banners.push(alertBox("warn", t("ban.strikes", { n: me.strikes, max: me.maxStrikes })));
   if (me.purgeWarning) banners.push(alertBox("warn", t("ban.purge", { date: when(me.purgeAt) })));
   if (me.warning) banners.push(alertBox("warn", t("ban.warn", { date: when(me.offAt) })));
   if (st.full) banners.push(alertBox("err", t("ban.full")));

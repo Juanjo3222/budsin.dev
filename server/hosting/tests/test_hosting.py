@@ -627,6 +627,65 @@ class HostingTest(unittest.TestCase):
             sys.stderr = orig
         self.assertEqual(errors, [])
 
+
+    def test_z1_strikes_y_vetos(self):
+        self.reg("tok-carla", "carla-web")
+        adm = lambda path, body=None, m="POST": call(self.base, m, path, "tok-admin", body)
+        me = lambda: call(self.base, "GET", "/me", "tok-carla")[1]
+        # solo el admin puede
+        self.assertEqual(call(self.base, "POST", "/admin/account/uid-carla/strike", "tok-carla", {"delta": 1})[0], 403)
+        self.assertEqual(me()["strikes"], 0)
+        self.assertEqual(me()["maxStrikes"], 3)
+        code, r = adm("/admin/account/uid-carla/strike", {"delta": 1, "reason": "spam"})
+        self.assertEqual((code, r["strikes"], r["autoBanned"]), (200, 1, False))
+        self.assertEqual(adm("/admin/account/uid-carla/strike", {"delta": 0})[1]["error"], "bad_delta")
+        self.assertEqual(adm("/admin/account/uid-carla/strike", {"delta": "x"})[1]["error"], "bad_delta")
+        self.assertEqual(adm("/admin/account/uid-carla/strike", {"delta": -1})[1]["strikes"], 0)
+        self.assertEqual(adm("/admin/account/uid-carla/strike", {"delta": -1})[1]["strikes"], 0)   # nunca baja de 0
+        adm("/admin/account/uid-carla/strike", {"delta": 1, "reason": "a"})
+        adm("/admin/account/uid-carla/strike", {"delta": 1, "reason": "b"})
+        self.assertFalse(me()["banned"])
+        code, r = adm("/admin/account/uid-carla/strike", {"delta": 1, "reason": "c"})
+        self.assertEqual((r["strikes"], r["autoBanned"]), (3, True))
+        m = me()
+        self.assertEqual((m["banned"], m["banKind"], m["banUntil"]), (True, "perm", None))
+        self.assertIn("3 strikes", m["banReason"])
+        self.assertEqual(call(self.base, "POST", "/power", "tok-carla", {"on": True})[1]["error"], "banned")
+        log = adm("/admin/strikes?uid=uid-carla", m="GET")[1]["strikes"]
+        self.assertEqual([x["delta"] for x in log][:2], [1, 1])
+        self.assertEqual(log[0]["actor"], "admin@x.com")
+        # quitar un strike no levanta el veto solo; lo levanta el admin
+        adm("/admin/account/uid-carla/strike", {"delta": -1})
+        self.assertTrue(me()["banned"])
+        self.assertEqual(adm("/admin/account/uid-carla/ban", {"kind": "none"})[0], 200)
+        m = me()
+        self.assertEqual((m["banned"], m["banKind"], m["strikes"]), (False, "", 2))
+        # veto temporal: validación y caducidad automática
+        self.assertEqual(adm("/admin/account/uid-carla/ban", {"kind": "temp", "days": 0})[1]["error"], "bad_days")
+        self.assertEqual(adm("/admin/account/uid-carla/ban", {"kind": "temp", "days": 999})[1]["error"], "bad_days")
+        self.assertEqual(adm("/admin/account/uid-carla/ban", {"kind": "raro"})[1]["error"], "bad_ban_kind")
+        self.assertEqual(adm("/admin/account/uid-carla/ban", {"kind": "temp", "days": 3, "reason": "descanso"})[0], 200)
+        m = me()
+        self.assertEqual((m["banned"], m["banKind"], m["banReason"]), (True, "temp", "descanso"))
+        self.assertIsNotNone(m["banUntil"])
+        self.svc.tick()
+        self.assertTrue(me()["banned"])                                                           # aún no vence
+        self.svc.store.run("UPDATE accounts SET ban_until=? WHERE uid='uid-carla'", (int(time.time()) - 5,))
+        self.svc.tick()
+        self.assertEqual((me()["banned"], me()["banKind"]), (False, ""))
+        # suspensión (soft): sin fecha, no caduca sola
+        self.assertEqual(adm("/admin/account/uid-carla/ban", {"kind": "soft", "reason": "revisión"})[0], 200)
+        self.svc.tick()
+        m = me()
+        self.assertEqual((m["banned"], m["banKind"], m["banUntil"]), (True, "soft", None))
+        # formato antiguo y listado del admin
+        adm("/admin/account/uid-carla/ban", {"banned": False})
+        adm("/admin/account/uid-carla/ban", {"banned": True})
+        self.assertEqual(me()["banKind"], "perm")
+        acc = next(a for a in adm("/admin/accounts", m="GET")[1]["accounts"] if a["uid"] == "uid-carla")
+        self.assertEqual((acc["banned"], acc["banKind"], acc["strikes"]), (True, "perm", 2))
+        adm("/admin/account/uid-carla/ban", {"kind": "none"})
+
     def test_r_cors_y_planes(self):
         code, body = call(self.base, "GET", "/plans")
         self.assertEqual([p["id"] for p in body["plans"]], ["free", "plus", "pro", "ultra"])

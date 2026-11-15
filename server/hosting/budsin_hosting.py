@@ -68,6 +68,8 @@ BADGE_HTML = (
 BADGE_RE = re.compile(re.escape(BADGE_START).encode() + rb".*?" + re.escape(BADGE_END).encode(), re.S)
 BODY_CLOSE_RE = re.compile(rb"</body\s*>(?!.*</body\s*>)", re.I | re.S)
 PLAN_ORDER = ["free", "plus", "pro", "ultra"]
+MAX_STRIKES = 3        # al llegar aquí la cuenta queda vetada para siempre
+BAN_KINDS = ("soft", "temp", "perm")
 
 USERNAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,28})[a-z0-9]$")
 SITE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}$")
@@ -198,6 +200,10 @@ class Store:
                     id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT NOT NULL, ts INTEGER NOT NULL,
                     event TEXT NOT NULL, detail TEXT);
                 CREATE INDEX IF NOT EXISTS history_uid ON history(uid, id);
+                CREATE TABLE IF NOT EXISTS strikes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT NOT NULL, ts INTEGER NOT NULL,
+                    delta INTEGER NOT NULL, total INTEGER NOT NULL, reason TEXT, actor TEXT);
+                CREATE INDEX IF NOT EXISTS strikes_uid ON strikes(uid, id);
                 CREATE TABLE IF NOT EXISTS subs (
                     sub_id TEXT PRIMARY KEY, uid TEXT NOT NULL, plan TEXT NOT NULL, status TEXT,
                     paid_until INTEGER NOT NULL DEFAULT 0, last_checked INTEGER NOT NULL DEFAULT 0,
@@ -211,9 +217,13 @@ class Store:
 
         with self.conn() as db:  # bases creadas antes de añadir estas columnas
             cols = {r["name"] for r in db.execute("PRAGMA table_info(accounts)")}
-            for col in ("off_since", "purge_warned"):
+            for col in ("off_since", "purge_warned", "strikes", "ban_until"):
                 if col not in cols:
                     db.execute(f"ALTER TABLE accounts ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+            for col in ("ban_kind", "ban_reason"):
+                if col not in cols:
+                    db.execute(f"ALTER TABLE accounts ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+            db.execute("UPDATE accounts SET ban_kind='perm' WHERE banned=1 AND ban_kind=''")
 
     @contextlib.contextmanager
     def conn(self):
@@ -404,7 +414,10 @@ class Service:
         return {
             "username": acc["username"], "email": acc["email"], "url": self.site_url(acc["username"]),
             "plan": plan, "planName": p["name"], "planUntil": iso(acc["plan_until"]) if plan != "free" else None,
-            "banned": bool(acc["banned"]),
+            "banned": bool(acc["banned"]), "banKind": acc["ban_kind"] if acc["banned"] else "",
+            "banUntil": iso(acc["ban_until"]) if acc["banned"] and acc["ban_until"] else None,
+            "banReason": acc["ban_reason"] if acc["banned"] else "",
+            "strikes": acc["strikes"], "maxStrikes": MAX_STRIKES,
             "state": "on" if acc["powered"] else "off", "poweredSince": iso(acc["powered_since"]) if acc["powered"] else None,
             "offAt": iso(acc["off_at"]) if acc["powered"] and acc["off_at"] else None, "secondsLeft": remaining,
             "neverOff": bool(acc["powered"] and not acc["off_at"]),
@@ -904,6 +917,7 @@ class Service:
             self.apply_branding(acc["uid"])
             if acc["powered"] and not acc["off_at"]:
                 self.store.run("UPDATE accounts SET off_at=? WHERE uid=?", (now + PLANS["free"]["hours"] * HOUR, acc["uid"]))
+        self.lift_expired_bans(now)
         self.purge_abandoned(now)
         self.reconcile_flags()
 
@@ -947,6 +961,8 @@ class Service:
                 "planUntil": iso(a["plan_until"]) if a["plan_until"] else None,
                 "state": "on" if a["powered"] else "off", "offAt": iso(a["off_at"]) if a["powered"] and a["off_at"] else None,
                 "used": a["used_bytes"], "limit": PLANS[plan]["gb"] * GB, "banned": bool(a["banned"]),
+                "banKind": a["ban_kind"] if a["banned"] else "", "banUntil": iso(a["ban_until"]) if a["banned"] and a["ban_until"] else None,
+                "banReason": a["ban_reason"] if a["banned"] else "", "strikes": a["strikes"],
                 "created": iso(a["created"]),
                 "sites": [s["name"] for s in self.store.q("SELECT name FROM sites WHERE uid=?", (a["uid"],))],
             })
@@ -966,14 +982,61 @@ class Service:
         self.apply_branding(uid)
         return {"ok": True}
 
-    def admin_ban(self, uid, banned, actor):
+    def admin_ban(self, uid, kind, days=0, reason="", actor=""):
+        """kind: none (levantar), soft (suspensión sin fecha), temp (hasta una fecha, se levanta sola) o perm."""
         acc = self.need_account(uid)
-        self.store.run("UPDATE accounts SET banned=? WHERE uid=?", (1 if banned else 0, uid))
-        if banned:
-            self.power_off(uid, "banned", f"por {actor}")
-        else:
+        if kind is True:
+            kind = "perm"
+        if kind in (False, None, "", "none"):
+            self.store.run("UPDATE accounts SET banned=0, ban_kind='', ban_until=0, ban_reason='' WHERE uid=?", (uid,))
             self.store.log(uid, "unbanned", f"por {actor}")
+            return {"ok": True}
+        if kind not in BAN_KINDS:
+            raise HttpError(400, "bad_ban_kind")
+        until = 0
+        if kind == "temp":
+            try:
+                days = int(days)
+            except (TypeError, ValueError):
+                days = 0
+            if not 1 <= days <= 365:
+                raise HttpError(400, "bad_days")
+            until = int(time.time()) + days * DAY
+        reason = (reason or "").strip()[:300]
+        self.store.run("UPDATE accounts SET banned=1, ban_kind=?, ban_until=?, ban_reason=? WHERE uid=?", (kind, until, reason, uid))
+        detail = f"{kind}" + (f" hasta {iso(until)}" if until else "") + (f" · {reason}" if reason else "") + f" · por {actor}"
+        self.store.log(uid, "ban_" + kind, detail)
+        self.power_off(uid, "banned", f"por {actor}")
         return {"ok": True}
+
+    def admin_strike(self, uid, delta, reason, actor):
+        """Suma (delta>0) o quita (delta<0) strikes. Al llegar a MAX_STRIKES se veta la cuenta para siempre."""
+        acc = self.need_account(uid)
+        try:
+            delta = int(delta)
+        except (TypeError, ValueError):
+            raise HttpError(400, "bad_delta")
+        if delta == 0 or abs(delta) > MAX_STRIKES:
+            raise HttpError(400, "bad_delta")
+        reason = (reason or "").strip()[:300]
+        total = max(0, min(99, acc["strikes"] + delta))
+        self.store.run("UPDATE accounts SET strikes=? WHERE uid=?", (total, uid))
+        self.store.run("INSERT INTO strikes (uid,ts,delta,total,reason,actor) VALUES (?,?,?,?,?,?)", (uid, int(time.time()), delta, total, reason, actor))
+        self.store.log(uid, "strike" if delta > 0 else "strike_removed", f"{delta:+d} → {total}/{MAX_STRIKES}" + (f" · {reason}" if reason else "") + f" · por {actor}")
+        auto = False
+        if delta > 0 and total >= MAX_STRIKES and not (acc["banned"] and acc["ban_kind"] == "perm"):
+            self.admin_ban(uid, "perm", 0, f"{MAX_STRIKES} strikes" + (f": {reason}" if reason else ""), "automático")
+            auto = True
+        return {"ok": True, "strikes": total, "autoBanned": auto}
+
+    def admin_strikes(self, uid):
+        return {"strikes": [{"ts": iso(r["ts"]), "delta": r["delta"], "total": r["total"], "reason": r["reason"], "actor": r["actor"]}
+                            for r in self.store.q("SELECT * FROM strikes WHERE uid=? ORDER BY id DESC LIMIT 200", (uid,))]}
+
+    def lift_expired_bans(self, now):
+        for a in self.store.q("SELECT uid FROM accounts WHERE banned=1 AND ban_kind='temp' AND ban_until>0 AND ban_until<=?", (now,)):
+            self.store.run("UPDATE accounts SET banned=0, ban_kind='', ban_until=0, ban_reason='' WHERE uid=?", (a["uid"],))
+            self.store.log(a["uid"], "ban_expired", "el veto temporal terminó")
 
     # ---------- denuncias ----------
     def report(self, url, reason, contact):
@@ -1296,13 +1359,15 @@ def make_handler(svc):
                 return svc.admin_accounts()
             if method == "GET" and sub == "/history":
                 return svc.admin_history(query.get("uid", ""))
+            if method == "GET" and sub == "/strikes":
+                return svc.admin_strikes(query.get("uid", ""))
             if method == "GET" and sub == "/reports":
                 return {"reports": [dict(r) for r in svc.store.q("SELECT * FROM reports ORDER BY id DESC LIMIT 200")]}
             m = re.fullmatch(r"/reports/(\d+)", sub)
             if method == "POST" and m:
                 svc.store.run("UPDATE reports SET status=? WHERE id=?", (str(self.read_json().get("status", "closed"))[:20], int(m.group(1))))
                 return {"ok": True}
-            m = re.fullmatch(r"/account/([A-Za-z0-9_-]{1,128})/(power|plan|ban)", sub)
+            m = re.fullmatch(r"/account/([A-Za-z0-9_-]{1,128})/(power|plan|ban|strike)", sub)
             if method == "POST" and m:
                 uid, action = m.group(1), m.group(2)
                 body = self.read_json()
@@ -1315,7 +1380,12 @@ def make_handler(svc):
                     return svc.power_off(uid, "forced_off", f"por {actor}")
                 if action == "plan":
                     return svc.admin_set_plan(uid, str(body.get("plan")), int(body.get("days", 30)), actor)
-                return svc.admin_ban(uid, bool(body.get("banned")), actor)
+                if action == "strike":
+                    return svc.admin_strike(uid, body.get("delta", 1), str(body.get("reason", "")), actor)
+                kind = body.get("kind")
+                if kind is None:  # compatibilidad con el formato antiguo {banned: true|false}
+                    kind = "perm" if body.get("banned") else "none"
+                return svc.admin_ban(uid, kind, body.get("days", 0), str(body.get("reason", "")), actor)
             raise HttpError(404, "not_found")
 
         def handle_any(self, method):

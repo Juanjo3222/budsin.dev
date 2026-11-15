@@ -62,7 +62,7 @@ function render(filter = "") {
     <div class="h-card"><div class="h-row"><h2 style="margin:0">Cuentas</h2><input class="h-input" id="q" placeholder="Buscar nombre o correo" value="${esc(filter)}"></div>
       <div class="h-scroll"><table class="h-table"><thead><tr><th>Cuenta</th><th>Plan</th><th>Estado</th><th>Uso</th><th>Acciones</th></tr></thead><tbody>
       ${rows.map((a) => `<tr>
-        <td><a href="https://${esc(a.username)}.budsin.dev/" target="_blank" rel="noopener" style="color:var(--accent)">${esc(a.username)}</a><br><span class="h-muted">${esc(a.email)}</span>${a.banned ? '<br><span style="color:#f87171">VETADA</span>' : ""}</td>
+        <td><a href="https://${esc(a.username)}.budsin.dev/" target="_blank" rel="noopener" style="color:var(--accent)">${esc(a.username)}</a><br><span class="h-muted">${esc(a.email)}</span>${a.banned ? '<br><span style="color:#f87171">' + ({ soft: "SUSPENDIDA", temp: "VETO TEMPORAL" + (a.banUntil ? " hasta " + esc(when(a.banUntil)) : ""), perm: "VETO PERMANENTE" }[a.banKind] || "VETADA") + (a.banReason ? " · " + esc(a.banReason) : "") + "</span>" : ""}${a.strikes ? '<br><span style="color:#fbbf24">⚠ ' + a.strikes + "/3 strikes</span>" : ""}</td>
         <td>${esc(a.plan)}${a.planUntil ? '<br><span class="h-muted">hasta ' + esc(when(a.planUntil)) + "</span>" : ""}</td>
         <td>${a.state === "on" ? "🟢 on" : "⚪ off"}${a.offAt ? '<br><span class="h-muted">' + esc(when(a.offAt)) + "</span>" : ""}</td>
         <td>${bytes(a.used)} / ${bytes(a.limit)}<br><span class="h-muted">${a.sites.length} sitios</span></td>
@@ -71,7 +71,10 @@ function render(filter = "") {
           <button class="btn btn-secondary h-btn-sm" data-a="off" data-u="${esc(a.uid)}">Apagar</button>
           <button class="btn btn-secondary h-btn-sm" data-a="plan" data-u="${esc(a.uid)}">Plan…</button>
           <button class="btn btn-secondary h-btn-sm" data-a="hist" data-u="${esc(a.uid)}">Historial</button>
-          <button class="btn btn-danger h-btn-sm" data-a="ban" data-u="${esc(a.uid)}" data-b="${a.banned ? 0 : 1}">${a.banned ? "Levantar veto" : "Vetar"}</button>
+          <button class="btn btn-secondary h-btn-sm" data-a="strike" data-u="${esc(a.uid)}" data-b="1">+ Strike</button>
+          <button class="btn btn-secondary h-btn-sm" data-a="strike" data-u="${esc(a.uid)}" data-b="-1" ${a.strikes ? "" : "disabled"}>− Strike</button>
+          <button class="btn btn-secondary h-btn-sm" data-a="strikelog" data-u="${esc(a.uid)}">Strikes…</button>
+          ${a.banned ? `<button class="btn btn-danger h-btn-sm" data-a="unban" data-u="${esc(a.uid)}">Levantar veto</button>` : `<button class="btn btn-danger h-btn-sm" data-a="ban" data-u="${esc(a.uid)}">Vetar…</button>`}
         </td></tr>`).join("") || '<tr><td colspan="5" class="h-muted">Sin resultados.</td></tr>'}
       </tbody></table></div></div>
     <div class="h-card" id="histbox" style="display:none"></div>
@@ -90,9 +93,29 @@ async function action(kind, uid, extra) {
   try {
     if (kind === "on") await api(`/admin/account/${uid}/power`, { method: "POST", body: { on: true } });
     else if (kind === "off") await api(`/admin/account/${uid}/power`, { method: "POST", body: { on: false } });
-    else if (kind === "ban") {
-      if (extra === "1" && !confirm("¿Vetar esta cuenta? Se apagará y no podrá encender su sitio.")) return;
-      await api(`/admin/account/${uid}/ban`, { method: "POST", body: { banned: extra === "1" } });
+    else if (kind === "unban") {
+      if (!confirm("¿Levantar el veto de esta cuenta? Los strikes se conservan.")) return;
+      await api(`/admin/account/${uid}/ban`, { method: "POST", body: { kind: "none" } });
+    } else if (kind === "ban") {
+      const k = (prompt("Tipo de veto:\n  soft = suspensión sin fecha (hasta que la levantes)\n  temp = temporal (se levanta sola)\n  perm = permanente", "soft") || "").trim().toLowerCase();
+      if (!k) return;
+      if (!["soft", "temp", "perm"].includes(k)) return note("err", "Escribe soft, temp o perm.");
+      let days = 0;
+      if (k === "temp") { days = Number(prompt("¿Cuántos días? (1-365)", "7")); if (!days) return; }
+      const reason = prompt("Motivo (lo verá el usuario):", "") || "";
+      await api(`/admin/account/${uid}/ban`, { method: "POST", body: { kind: k, days, reason } });
+    } else if (kind === "strike") {
+      const add = Number(extra) > 0;
+      const reason = add ? prompt("Motivo del strike (lo verá el usuario). Al llegar a 3 se veta para siempre:", "") : "";
+      if (add && reason === null) return;
+      const r = await api(`/admin/account/${uid}/strike`, { method: "POST", body: { delta: Number(extra), reason: reason || "" } });
+      note(r.autoBanned ? "warn" : "ok", r.autoBanned ? "3 strikes: la cuenta quedó vetada para siempre." : `Strikes: ${r.strikes}/3`);
+    } else if (kind === "strikelog") {
+      const h = await api("/admin/strikes?uid=" + encodeURIComponent(uid));
+      const box = $("#histbox");
+      box.style.display = "";
+      box.innerHTML = '<h2>Strikes</h2>' + (h.strikes.length ? '<table class="hist"><tbody>' + h.strikes.map((x) => `<tr><td>${esc(when(x.ts))}</td><td>${x.delta > 0 ? "+" : ""}${x.delta} → ${x.total}/3</td><td>${esc(x.reason || "")}</td><td>${esc(x.actor || "")}</td></tr>`).join("") + "</tbody></table>" : '<p class="h-muted">Sin strikes.</p>');
+      return box.scrollIntoView();
     } else if (kind === "plan") {
       const plan = prompt("Plan (free, plus, pro, ultra):");
       if (!plan) return;
