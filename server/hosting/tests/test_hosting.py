@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,7 @@ TOKENS = {
     "tok-admin": ("uid-admin", "admin@x.com", True),
     "tok-sinverificar": ("uid-sv", "admin@x.com", False),
     "tok-carla": ("uid-carla", "carla@x.com", True),
+    "tok-dina": ("uid-dina", "dina@x.com", True),
 }
 SUBS = {}
 CALLS = {"cancel": 0}
@@ -99,6 +101,9 @@ def call(base, method, path, token=None, body=None, raw=None, headers=None):
     except urllib.error.HTTPError as e:
         with e:
             return e.code, json.loads(e.read() or b"{}")
+
+
+EDIT_BIG = 513 * 1024
 
 
 def rd(path):
@@ -446,6 +451,181 @@ class HostingTest(unittest.TestCase):
         self.assertEqual(body["purgeDays"], 90)
         self.assertEqual(body["purgeWarnDays"], 60)
         self.assertTrue(all(not p["badge"] for p in body["plans"][1:]))
+
+
+    # --- gestor de archivos ---
+    def fm(self, method, token, site, op, path=None, data=None, body=None):
+        q = "" if path is None else "?path=" + urllib.parse.quote(path, safe="")
+        return call(self.base, method, f"/sites/{site}/{op}{q}", token, body=body, raw=data)
+
+    def put(self, token, site, path, data):
+        return self.fm("PUT", token, site, "file", path, data if isinstance(data, bytes) else data.encode())
+
+    def test_y1_archivo_suelto_crea_el_sitio_y_pone_insignia(self):
+        self.reg("tok-dina", "dina-web")
+        code, me = self.put("tok-dina", "mi-sitio", "index.html", "<html><body><h1>Hola</h1></body></html>")
+        self.assertEqual(code, 200, me)
+        self.assertEqual([s["name"] for s in me["sites"]], ["mi-sitio"])
+        html = rd(self.tmp + "/sites/dina-web/mi-sitio/index.html")
+        self.assertEqual(html.count(bh.BADGE_START), 1)
+        self.assertLess(html.index(bh.BADGE_START), html.index("</body>"))
+        self.assertGreater(me["storage"]["used"], 0)
+        code, lst = self.fm("GET", "tok-dina", "mi-sitio", "files", "")
+        self.assertEqual((code, [e["name"] for e in lst["entries"]]), (200, ["index.html"]))
+        self.assertTrue(lst["entries"][0]["editable"])
+
+    def test_y2_rutas_peligrosas_se_rechazan(self):
+        base = self.tmp + "/sites/dina-web/mi-sitio"
+        malas = ["../x.html", "..%2fx.html", "a/../../b.html", "..\\x.html", ".env.html", "ok/.oculto.html",
+                 "a/./../../c.html", "con:dos.html", "a" * 101 + ".html", "/".join(["d"] * 10) + "/x.html", "nombre.html."]
+        for path in malas:
+            code, body = self.put("tok-dina", "mi-sitio", path, "x")
+            self.assertEqual((code, body.get("error")), (400, "bad_path"), path)
+        # nada se escribió fuera del sitio
+        self.assertEqual(sorted(os.listdir(self.tmp + "/sites")), sorted(n for n in os.listdir(self.tmp + "/sites")))
+        # una ruta absoluta se normaliza dentro del sitio, nunca fuera de él
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "/etc/abs.html", "<p>x</p>")[0], 200)
+        self.assertTrue(os.path.exists(base + "/etc/abs.html"))
+        self.assertFalse(os.path.exists("/etc/abs.html"))
+        for escapado in ("x.html", "b.html", "c.html"):
+            self.assertFalse(os.path.exists(os.path.join(base, escapado)))
+            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(base), escapado)))
+            self.assertFalse(os.path.exists(os.path.join(self.tmp + "/sites", escapado)))
+        for op in ("files", "file"):
+            self.assertEqual(self.fm("GET", "tok-dina", "mi-sitio", op, "../")[1].get("error"), "bad_path")
+        self.assertEqual(self.fm("DELETE", "tok-dina", "mi-sitio", "file", "")[1].get("error"), "bad_path")  # nunca la raíz
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "mkdir", "../fuera")[1].get("error"), "bad_path")
+        self.assertEqual(self.fm("GET", "tok-dina", "otro-que-no-existe", "files", "")[1].get("error"), "no_site")
+
+    def test_y3_tipos_de_archivo_y_nombres(self):
+        for name in ("run.exe", "a.php", "sin-extension", "x.sh", "z.zip"):
+            code, body = self.put("tok-dina", "mi-sitio", name, "x")
+            self.assertEqual((code, body.get("error")), (400, "file_type_not_allowed"), name)
+        code, body = self.put("tok-dina", "mi-sitio", "porn.html", "<p>x</p>")
+        self.assertEqual((code, body.get("error")), (400, "bad_file_name"))
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "css/estilo.css", "body{}")[0], 200)
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "mi carpeta/foto 1.png", b"\x89PNG")[0], 200)  # espacios permitidos
+        self.assertTrue(os.path.exists(self.tmp + "/sites/dina-web/mi-sitio/mi carpeta/foto 1.png"))
+
+    def test_y4_contenido_bloqueado_y_marca_falsa(self):
+        code, body = self.put("tok-dina", "mi-sitio", "login.html", '<form><input type="password"></form>')
+        self.assertEqual((code, body.get("error")), (400, "content_blocked"))
+        self.assertFalse(os.path.exists(self.tmp + "/sites/dina-web/mi-sitio/login.html"))
+        fake = "<body>hola " + bh.BADGE_START + "<b>falsa</b>" + bh.BADGE_END + "</body>"
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "pagina.html", fake)[0], 200)
+        html = rd(self.tmp + "/sites/dina-web/mi-sitio/pagina.html")
+        self.assertEqual(html.count(bh.BADGE_START), 1)
+        self.assertNotIn("falsa", html)                       # la marca pegada a mano se sustituye por la oficial
+        self.assertIn("budsin.dev/hosting", html)
+
+    def test_y5_limites_por_archivo_cuota_y_sitios(self):
+        uid = "uid-dina"
+        svc = self.svc
+        with self.assertRaises(bh.HttpError) as cm:
+            svc.write_file(uid, "mi-sitio", "grande.mp4", io.BytesIO(b""), 16 * 1024 * 1024)   # Free: 15 MB por archivo
+        self.assertEqual((cm.exception.status, cm.exception.code), (413, "file_too_large"))
+        self.svc.store.run("UPDATE accounts SET used_bytes=? WHERE uid=?", (bh.GB, uid))
+        code, body = self.put("tok-dina", "mi-sitio", "otro.html", "<p>x</p>")
+        self.assertEqual((code, body.get("error")), (413, "storage_full"))
+        self.svc.refresh_usage(uid, "dina-web")
+        code, body = self.put("tok-dina", "segundo-sitio", "index.html", "<p>x</p>")        # Free: 1 solo sitio (autocreación incluida)
+        self.assertEqual((code, body.get("error")), (409, "too_many_sites"))
+        self.assertFalse(os.path.exists(self.tmp + "/sites/dina-web/segundo-sitio"))
+
+    def test_y6_mover_y_renombrar(self):
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "notas.txt", '<input type="password"> texto')[0], 200)  # .txt no se escanea como HTML
+        code, body = self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "notas.txt", "to": "notas.html"})
+        self.assertEqual((code, body.get("error")), (400, "content_blocked"))                                      # renombrar a .html sí
+        self.assertTrue(os.path.exists(self.tmp + "/sites/dina-web/mi-sitio/notas.txt"))
+        self.assertFalse(os.path.exists(self.tmp + "/sites/dina-web/mi-sitio/notas.html"))
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "limpio.txt", "texto normal")[0], 200)
+        code, me = self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "limpio.txt", "to": "paginas/nueva.html"})
+        self.assertEqual(code, 200, me)
+        self.assertEqual(rd(self.tmp + "/sites/dina-web/mi-sitio/paginas/nueva.html").count(bh.BADGE_START), 1)  # y recibe la insignia
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "limpio.txt", "to": "z.html"})[1]["error"], "no_file")
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "paginas/nueva.html", "to": "notas.txt"})[1]["error"], "exists")
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "paginas/nueva.html", "to": "malo.exe"})[1]["error"], "file_type_not_allowed")
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "paginas/nueva.html", "to": "../fuera.html"})[1]["error"], "bad_path")
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "mkdir", "a/b")[0], 200)
+        code, body = self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "a", "to": "a/b/c"})
+        self.assertEqual((code, body.get("error")), (400, "bad_path"))                                              # carpeta dentro de sí misma
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "mkdir", "a/b")[1]["error"], "exists")
+        self.assertEqual(self.fm("POST", "tok-dina", "mi-sitio", "move", body={"from": "a", "to": "renombrada"})[0], 200)
+        self.assertTrue(os.path.isdir(self.tmp + "/sites/dina-web/mi-sitio/renombrada/b"))
+
+    def test_y7_editor_quita_y_repone_la_insignia(self):
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "editar.html", "<body>v1</body>")[0], 200)
+        code, f = self.fm("GET", "tok-dina", "mi-sitio", "file", "editar.html")
+        self.assertEqual((code, f["content"]), (200, "<body>v1</body>"))                       # el editor no ve la insignia
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "editar.html", f["content"].replace("v1", "v2"))[0], 200)
+        self.assertEqual(rd(self.tmp + "/sites/dina-web/mi-sitio/editar.html").count(bh.BADGE_START), 1)
+        self.assertEqual(self.fm("GET", "tok-dina", "mi-sitio", "file", "editar.html")[1]["content"], "<body>v2</body>")
+        self.put("tok-dina", "mi-sitio", "foto.png", b"\x89PNG")
+        self.assertEqual(self.fm("GET", "tok-dina", "mi-sitio", "file", "foto.png")[1]["error"], "not_text")
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "enorme.txt", "x" * (EDIT_BIG))[0], 200)
+        self.assertEqual(self.fm("GET", "tok-dina", "mi-sitio", "file", "enorme.txt")[1]["error"], "too_large_to_edit")
+        # con un plan de pago no hay insignia
+        self.svc.store.run("UPDATE accounts SET plan='plus', plan_until=? WHERE uid='uid-dina'", (int(time.time()) + 86400,))
+        self.assertEqual(self.put("tok-dina", "mi-sitio", "editar.html", "<body>v3</body>")[0], 200)
+        self.assertEqual(rd(self.tmp + "/sites/dina-web/mi-sitio/editar.html"), "<body>v3</body>")
+        self.svc.store.run("UPDATE accounts SET plan='free', plan_until=0 WHERE uid='uid-dina'")
+        self.svc.apply_branding("uid-dina")
+
+    def test_y8_borrar_listar_y_ocultos(self):
+        with open(self.tmp + "/sites/dina-web/mi-sitio/.secreto", "w") as fh:
+            fh.write("x")
+        code, lst = self.fm("GET", "tok-dina", "mi-sitio", "files", "")
+        names = [e["name"] for e in lst["entries"]]
+        self.assertNotIn(".secreto", names)
+        dirs = [e["name"] for e in lst["entries"] if e["type"] == "dir"]
+        self.assertEqual(names[:len(dirs)], dirs)                                               # carpetas primero
+        code, me = self.fm("DELETE", "tok-dina", "mi-sitio", "file", "renombrada")
+        self.assertEqual(code, 200)
+        self.assertFalse(os.path.exists(self.tmp + "/sites/dina-web/mi-sitio/renombrada"))
+        self.assertEqual(self.fm("DELETE", "tok-dina", "mi-sitio", "file", "renombrada")[1]["error"], "no_file")
+        self.assertEqual(self.fm("DELETE", "tok-dina", "mi-sitio", "file", "index.html")[0], 200)
+        site = next(s for s in call(self.base, "GET", "/me", "tok-dina")[1]["sites"] if s["name"] == "mi-sitio")
+        self.assertGreater(site["files"], 0)                                                    # el contador de archivos se actualiza
+
+    def test_y9_crear_sitio_vacio_y_baneo(self):
+        self.reg("tok-sinverificar", "vacio-web") if False else None
+        self.svc.store.run("UPDATE accounts SET plan='plus', plan_until=? WHERE uid='uid-dina'", (int(time.time()) + 86400,))
+        code, me = self.fm("POST", "tok-dina", "nuevo", "create")
+        self.assertEqual(code, 200, me)
+        self.assertIn("<h1>Hello, world!</h1>", rd(self.tmp + "/sites/dina-web/nuevo/index.html"))
+        self.assertEqual(self.fm("POST", "tok-dina", "nuevo", "create")[1]["error"], "site_exists")
+        self.assertEqual(self.fm("POST", "tok-dina", "porno", "create")[1]["error"], "bad_site_name")
+        call(self.base, "POST", "/admin/account/uid-dina/ban", "tok-admin", {"banned": True})
+        self.assertEqual(self.put("tok-dina", "nuevo", "x.html", "<p>x</p>")[1]["error"], "banned")
+        self.assertEqual(self.fm("GET", "tok-dina", "nuevo", "files", "")[1]["error"], "banned")
+        call(self.base, "POST", "/admin/account/uid-dina/ban", "tok-admin", {"banned": False})
+        self.svc.store.run("UPDATE accounts SET plan='free', plan_until=0 WHERE uid='uid-dina'")
+
+    def test_y91_put_en_conexion_persistente(self):
+        import http.client
+        errors = []
+        orig = sys.stderr
+        class Spy:
+            def write(self, s):
+                if "Traceback" in s or "Error" in s or "Exception" in s:
+                    errors.append(s)
+            def flush(self):
+                pass
+        sys.stderr = Spy()
+        try:
+            c = http.client.HTTPConnection("127.0.0.1", self.api.server_port)
+            hdr = {"Authorization": "Bearer tok-dina"}
+            c.request("PUT", "/api/hosting/sites/mi-sitio/file?path=" + urllib.parse.quote("ka/uno.html", safe=""), body=b"<p>1</p>", headers=hdr)
+            r = c.getresponse(); self.assertEqual(r.status, 200); r.read()
+            c.request("GET", "/api/hosting/sites/mi-sitio/files?path=ka", headers=hdr)               # misma conexión
+            r = c.getresponse(); self.assertEqual(r.status, 200); r.read()
+            c.request("PUT", "/api/hosting/sites/mi-sitio/file?path=malo.exe", body=b"x" * 4000, headers=hdr)   # error sin leer el cuerpo
+            r = c.getresponse(); self.assertEqual(r.status, 400); self.assertEqual(r.getheader("Connection"), "close"); r.read()
+            c.close()
+            time.sleep(0.2)
+        finally:
+            sys.stderr = orig
+        self.assertEqual(errors, [])
 
     def test_r_cors_y_planes(self):
         code, body = call(self.base, "GET", "/plans")

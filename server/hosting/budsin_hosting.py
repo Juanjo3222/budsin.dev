@@ -24,6 +24,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -78,6 +79,15 @@ ALLOWED_EXT = {
     ".wasm", ".data", ".unityweb", ".br", ".gz",
 }
 TEXT_EXT = {".html", ".htm", ".css", ".js", ".mjs", ".json", ".txt", ".md", ".xml", ".svg", ".csv"}
+EDITABLE_EXT = TEXT_EXT | {".webmanifest"}   # los que se pueden abrir en el editor del panel
+EDIT_MAX = 512 * 1024
+MAX_DEPTH = 8
+NAME_BAD = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
+STARTER_HTML = (
+    '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n'
+    '  <meta name="viewport" content="width=device-width, initial-scale=1">\n  <title>{name}</title>\n</head>\n'
+    '<body>\n  <h1>Hello, world!</h1>\n  <p>Edit this page from your Budsin Hosting dashboard.</p>\n</body>\n</html>\n'
+)
 
 
 def env(name, default=""):
@@ -97,7 +107,8 @@ class Config:
         self.admins = {e.strip().lower() for e in env("ADMIN_EMAILS", "juvaldiviam@gmail.com").split(",") if e.strip()}
         self.origins = [o.strip() for o in env("ALLOWED_ORIGINS", "https://budsin.dev").split(",") if o.strip()]
         self.rate_limit = int(env("RATE_LIMIT", "90"))      # peticiones por minuto y por IP
-        self.upload_rate = int(env("UPLOAD_RATE", "12"))    # subidas por minuto y por IP
+        self.upload_rate = int(env("UPLOAD_RATE", "12"))    # subidas de .zip por minuto y por IP
+        self.files_rate = int(env("FILES_RATE", "300"))     # operaciones del gestor de archivos por minuto y por IP
         self.max_upload = int(float(env("MAX_UPLOAD_MB", "95")) * 1024 * 1024)
         self.total_cap = int(float(env("TOTAL_CAP_GB", "40")) * GB)
         self.paypal_api = env("PAYPAL_API_BASE", "https://api-m.sandbox.paypal.com").rstrip("/")
@@ -151,13 +162,18 @@ def iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None
 
 
-def dir_size(path):
-    total = 0
+def dir_stats(path):
+    total, count = 0, 0
     for root, _dirs, files in os.walk(path):
         for f in files:
             with contextlib.suppress(OSError):
                 total += os.path.getsize(os.path.join(root, f))
-    return total
+                count += 1
+    return total, count
+
+
+def dir_size(path):
+    return dir_stats(path)[0]
 
 
 class Store:
@@ -233,8 +249,7 @@ class Service:
         for d in (cfg.sites_dir, cfg.active_dir):
             os.makedirs(d, mode=0o755, exist_ok=True)
         self._tokens = {}
-        self._hits = {}
-        self._uploads = {}
+        self._buckets = {"api": {}, "upload": {}, "files": {}}
         self._pp_token = ("", 0)
         self._lock = threading.Lock()
         self._upload_lock = threading.Lock()
@@ -422,9 +437,9 @@ class Service:
         rows = self.store.q("SELECT name FROM sites WHERE uid=?", (uid,))
         total = 0
         for r in rows:
-            b = dir_size(os.path.join(self.cfg.sites_dir, username, r["name"]))
+            b, n = dir_stats(os.path.join(self.cfg.sites_dir, username, r["name"]))
             total += b
-            self.store.run("UPDATE sites SET bytes=? WHERE uid=? AND name=?", (b, uid, r["name"]))
+            self.store.run("UPDATE sites SET bytes=?, files=?, updated=? WHERE uid=? AND name=?", (b, n, int(time.time()), uid, r["name"]))
         self.store.run("UPDATE accounts SET used_bytes=? WHERE uid=?", (total, uid))
         self.render_index(username, [r["name"] for r in rows])
         return total
@@ -574,8 +589,7 @@ class Service:
         """Añade la insignia de Budsin Hosting al final del <body> (una sola vez)."""
         with open(path, "rb") as fh:
             data = fh.read()
-        if BADGE_START.encode() in data:
-            return
+        data = BADGE_RE.sub(b"", data)  # se quita cualquier marca existente (también una pegada a mano) y se pone la oficial
         badge = BADGE_HTML.encode()
         m = BODY_CLOSE_RE.search(data)
         data = data[: m.start()] + badge + data[m.start():] if m else data + badge
@@ -621,6 +635,248 @@ class Service:
         reason = moderation.bad_text(text)
         if reason:
             raise HttpError(400, "content_blocked", file=rel, reason=reason)
+
+    # ---------- gestor de archivos ----------
+    def clean_rel(self, rel, allow_empty=True):
+        """Convierte una ruta relativa del cliente en una lista de componentes seguros."""
+        rel = (rel or "").replace("\\", "/")
+        parts = []
+        for part in rel.split("/"):
+            if part in ("", "."):
+                continue
+            if part == ".." or part.startswith(".") or NAME_BAD.search(part) or len(part) > 100 or part != part.strip() or part.endswith("."):
+                raise HttpError(400, "bad_path")
+            parts.append(part)
+        if len(parts) > MAX_DEPTH or (not parts and not allow_empty):
+            raise HttpError(400, "bad_path")
+        return parts
+
+    def site_base(self, acc, site):
+        site = (site or "").strip().lower()
+        if not SITE_RE.match(site):
+            raise HttpError(400, "bad_site_name", reason="usa letras minúsculas, números o guiones (máx. 39)")
+        return site, os.path.join(self.cfg.sites_dir, acc["username"], site)
+
+    def inside(self, base, parts):
+        """Ruta real dentro del sitio; falla si un enlace o un componente intentara salirse de él."""
+        target = os.path.join(base, *parts) if parts else base
+        real_base, real = os.path.realpath(base), os.path.realpath(target)
+        if real != real_base and not real.startswith(real_base + os.sep):
+            raise HttpError(400, "bad_path")
+        return target
+
+    def existing_site(self, uid, site):
+        acc = self.need_account(uid)
+        if acc["banned"]:
+            raise HttpError(403, "banned")
+        site, base = self.site_base(acc, site)
+        if not self.store.one("SELECT 1 FROM sites WHERE uid=? AND name=?", (uid, site)):
+            raise HttpError(404, "no_site")
+        return acc, site, base
+
+    def ensure_site(self, uid, acc, site, plan):
+        """Crea el sitio si no existe (respetando el límite del plan). Se llama con _upload_lock tomado."""
+        site, base = self.site_base(acc, site)
+        if self.store.one("SELECT 1 FROM sites WHERE uid=? AND name=?", (uid, site)):
+            return site, base, False
+        reason = moderation.bad_name(site, subdomain=False)
+        if reason:
+            raise HttpError(400, "bad_site_name", reason=reason)
+        if self.store.one("SELECT COUNT(*) AS n FROM sites WHERE uid=?", (uid,))["n"] >= PLANS[plan]["sites"]:
+            raise HttpError(409, "too_many_sites", max=PLANS[plan]["sites"])
+        os.makedirs(base, mode=0o755, exist_ok=True)
+        self.store.run("INSERT INTO sites (uid,name,bytes,files,updated) VALUES (?,?,0,0,?)", (uid, site, int(time.time())))
+        return site, base, True
+
+    def check_file_name(self, name):
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in ALLOWED_EXT:
+            raise HttpError(400, "file_type_not_allowed", file=name, ext=ext or "(sin extensión)")
+        if moderation.bad_text(os.path.splitext(name)[0]):
+            raise HttpError(400, "bad_file_name", file=name)
+        return ext
+
+    def entry_info(self, path, name):
+        st = os.stat(path)
+        is_dir = os.path.isdir(path)
+        ext = os.path.splitext(name)[1].lower()
+        return {"name": name, "type": "dir" if is_dir else "file", "size": 0 if is_dir else st.st_size, "mtime": iso(int(st.st_mtime)),
+                "editable": (not is_dir) and ext in EDITABLE_EXT and st.st_size <= EDIT_MAX}
+
+    def list_files(self, uid, site, rel):
+        acc, site, base = self.existing_site(uid, site)
+        parts = self.clean_rel(rel)
+        target = self.inside(base, parts)
+        if not os.path.isdir(target):
+            raise HttpError(404, "no_file")
+        entries = []
+        with os.scandir(target) as it:
+            for e in it:
+                if not e.name.startswith("."):
+                    with contextlib.suppress(OSError):
+                        entries.append(self.entry_info(e.path, e.name))
+        entries.sort(key=lambda x: (x["type"] != "dir", x["name"].lower()))
+        return {"site": site, "path": "/".join(parts), "entries": entries, "url": self.site_url(acc["username"], site)}
+
+    def read_file(self, uid, site, rel):
+        acc, site, base = self.existing_site(uid, site)
+        parts = self.clean_rel(rel, allow_empty=False)
+        target = self.inside(base, parts)
+        if not os.path.isfile(target):
+            raise HttpError(404, "no_file")
+        ext = os.path.splitext(parts[-1])[1].lower()
+        if ext not in EDITABLE_EXT:
+            raise HttpError(415, "not_text")
+        if os.path.getsize(target) > EDIT_MAX:
+            raise HttpError(413, "too_large_to_edit", max=EDIT_MAX)
+        with open(target, "rb") as fh:
+            data = BADGE_RE.sub(b"", fh.read())  # el editor no enseña la insignia: se vuelve a poner al guardar
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HttpError(415, "not_text")
+        return {"site": site, "path": "/".join(parts), "content": text, "size": len(data)}
+
+    def write_file(self, uid, site, rel, body_stream, length):
+        acc = self.need_account(uid)
+        if acc["banned"]:
+            raise HttpError(403, "banned")
+        parts = self.clean_rel(rel, allow_empty=False)
+        name = parts[-1]
+        ext = self.check_file_name(name)
+        plan = self.effective_plan(acc)
+        if length < 0:
+            raise HttpError(400, "bad_length")
+        if length > self.file_limit(plan):
+            raise HttpError(413, "file_too_large", file=name, max=self.file_limit(plan))
+        if length > self.upload_limit(plan):
+            raise HttpError(413, "upload_too_large", max=self.upload_limit(plan))
+        limit = PLANS[plan]["gb"] * GB
+        fd, tmp = tempfile.mkstemp(prefix=".up-", dir=self.cfg.sites_dir)
+        try:
+            got = 0
+            with os.fdopen(fd, "wb") as fh:
+                while got < length:
+                    chunk = body_stream.read(min(1024 * 1024, length - got))
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    got += len(chunk)
+            if got != length:
+                raise HttpError(400, "truncated_upload")
+            if ext in TEXT_EXT and length <= SCAN_BYTES:
+                self.scan_file(tmp, name, ext)
+            if ext in (".html", ".htm"):
+                if PLANS[plan]["badge"]:
+                    self.brand_file(tmp)
+                else:
+                    self.unbrand_file(tmp)
+            new_size = os.path.getsize(tmp)
+            with self._upload_lock:
+                acc = self.need_account(uid)
+                site, base, _created = self.ensure_site(uid, acc, site, plan)
+                target = self.inside(base, parts)
+                if os.path.isdir(target):
+                    raise HttpError(409, "is_dir", file=name)
+                old = os.path.getsize(target) if os.path.isfile(target) else None
+                if old is None and dir_stats(base)[1] >= MAX_FILES:
+                    raise HttpError(400, "too_many_files", max=MAX_FILES)
+                if acc["used_bytes"] - (old or 0) + new_size > limit:
+                    raise HttpError(413, "storage_full", limit=limit, needed=acc["used_bytes"] - (old or 0) + new_size)
+                total_used = self.store.one("SELECT COALESCE(SUM(used_bytes),0) AS s FROM accounts")["s"]
+                if total_used - (old or 0) + new_size > self.cfg.total_cap:
+                    raise HttpError(507, "server_full")
+                try:
+                    os.makedirs(os.path.dirname(target), mode=0o755, exist_ok=True)
+                except (FileExistsError, NotADirectoryError):
+                    raise HttpError(400, "bad_path")
+                os.replace(tmp, target)
+                tmp = None
+                os.chmod(target, 0o644)
+                self.refresh_usage(uid, acc["username"])
+        finally:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
+        return self.me(uid)
+
+    def make_dir(self, uid, site, rel):
+        acc, site, base = self.existing_site(uid, site)
+        parts = self.clean_rel(rel, allow_empty=False)
+        check = parts[-1]
+        if moderation.bad_text(check):
+            raise HttpError(400, "bad_file_name", file=check)
+        target = self.inside(base, parts)
+        with self._upload_lock:
+            if os.path.lexists(target):
+                raise HttpError(409, "exists", file=check)
+            try:
+                os.makedirs(target, mode=0o755)
+            except (FileExistsError, NotADirectoryError):
+                raise HttpError(400, "bad_path")
+        return {"ok": True}
+
+    def delete_path(self, uid, site, rel):
+        acc, site, base = self.existing_site(uid, site)
+        parts = self.clean_rel(rel, allow_empty=False)   # nunca la raíz del sitio: para eso está borrar el sitio
+        target = self.inside(base, parts)
+        with self._upload_lock:
+            if not os.path.lexists(target):
+                raise HttpError(404, "no_file")
+            if os.path.isdir(target) and not os.path.islink(target):
+                shutil.rmtree(target)
+            else:
+                os.remove(target)
+            self.refresh_usage(uid, acc["username"])
+        return self.me(uid)
+
+    def move_path(self, uid, site, src_rel, dst_rel):
+        acc, site, base = self.existing_site(uid, site)
+        src_parts = self.clean_rel(src_rel, allow_empty=False)
+        dst_parts = self.clean_rel(dst_rel, allow_empty=False)
+        src, dst = self.inside(base, src_parts), self.inside(base, dst_parts)
+        plan = self.effective_plan(acc)
+        with self._upload_lock:
+            if not os.path.lexists(src):
+                raise HttpError(404, "no_file")
+            if os.path.lexists(dst):
+                raise HttpError(409, "exists", file=dst_parts[-1])
+            if os.path.isdir(src):
+                if dst_parts[:len(src_parts)] == src_parts:
+                    raise HttpError(400, "bad_path")   # una carpeta no puede entrar en sí misma
+                if moderation.bad_text(dst_parts[-1]):
+                    raise HttpError(400, "bad_file_name", file=dst_parts[-1])
+            else:
+                ext = self.check_file_name(dst_parts[-1])
+                if ext in TEXT_EXT and os.path.getsize(src) <= SCAN_BYTES:
+                    self.scan_file(src, dst_parts[-1], ext)   # renombrar a .html no esquiva el escaneo
+            try:
+                os.makedirs(os.path.dirname(dst), mode=0o755, exist_ok=True)
+            except (FileExistsError, NotADirectoryError):
+                raise HttpError(400, "bad_path")
+            os.rename(src, dst)
+            if os.path.isfile(dst) and os.path.splitext(dst)[1].lower() in (".html", ".htm"):
+                (self.brand_file if PLANS[plan]["badge"] else self.unbrand_file)(dst)   # ni la insignia
+            self.refresh_usage(uid, acc["username"])
+        return self.me(uid)
+
+    def create_site(self, uid, site):
+        acc = self.need_account(uid)
+        if acc["banned"]:
+            raise HttpError(403, "banned")
+        plan = self.effective_plan(acc)
+        with self._upload_lock:
+            site, base, created = self.ensure_site(uid, acc, site, plan)
+            if not created:
+                raise HttpError(409, "site_exists")
+            index = os.path.join(base, "index.html")
+            with open(index, "w", encoding="utf-8") as fh:
+                fh.write(STARTER_HTML.format(name=html_escape(site)))
+            os.chmod(index, 0o644)
+            if PLANS[plan]["badge"]:
+                self.brand_file(index)
+            self.refresh_usage(uid, acc["username"])
+        self.store.log(uid, "create_site", site)
+        return self.me(uid)
 
     def delete_site(self, uid, site):
         acc = self.need_account(uid)
@@ -856,10 +1112,10 @@ class Service:
 
     # ---------- límites ----------
     def rate_ok(self, ip, bucket="api"):
-        limit = self.cfg.rate_limit if bucket == "api" else self.cfg.upload_rate
+        limit = {"api": self.cfg.rate_limit, "upload": self.cfg.upload_rate, "files": self.cfg.files_rate}[bucket]
         now = time.time()
         with self._lock:
-            store = self._hits if bucket == "api" else self._uploads
+            store = self._buckets[bucket]
             hits = [t for t in store.get(ip, []) if now - t < 60]
             hits.append(now)
             store[ip] = hits
@@ -916,7 +1172,7 @@ def make_handler(svc):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
                 self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
                 self.send_header("Access-Control-Max-Age", "600")
 
         def reply(self, status, payload):
@@ -955,7 +1211,7 @@ def make_handler(svc):
         def route(self, method):
             parsed = self.path.split("?", 1)
             path = parsed[0]
-            query = dict(p.split("=", 1) for p in (parsed[1].split("&") if len(parsed) > 1 else []) if "=" in p)
+            query = dict(urllib.parse.parse_qsl(parsed[1], keep_blank_values=True)) if len(parsed) > 1 else {}
             if not path.startswith(PREFIX):
                 raise HttpError(404, "not_found")
             sub = path[len(PREFIX):].rstrip("/") or "/"
@@ -999,7 +1255,33 @@ def make_handler(svc):
                 except ValueError:
                     raise HttpError(400, "bad_length")
                 return svc.upload(uid, site, self.rfile, length)
-            if method == "DELETE" and sub.startswith("/sites/"):
+            m = re.fullmatch(r"/sites/([a-z0-9-]{1,39})/(files|file|mkdir|move|create)", sub)
+            if m:   # gestor de archivos
+                if not svc.rate_ok(self.client_ip(), "files"):
+                    raise HttpError(429, "rate_limited")
+                site, op = m.groups()
+                rel = query.get("path", "")
+                if op == "files" and method == "GET":
+                    return svc.list_files(uid, site, rel)
+                if op == "file" and method == "GET":
+                    return svc.read_file(uid, site, rel)
+                if op == "file" and method == "PUT":
+                    try:
+                        length = int(self.headers.get("Content-Length", "0"))
+                    except ValueError:
+                        raise HttpError(400, "bad_length")
+                    return svc.write_file(uid, site, rel, self.rfile, length)
+                if op == "file" and method == "DELETE":
+                    return svc.delete_path(uid, site, rel)
+                if op == "mkdir" and method == "POST":
+                    return svc.make_dir(uid, site, rel)
+                if op == "move" and method == "POST":
+                    body = self.read_json()
+                    return svc.move_path(uid, site, body.get("from"), body.get("to"))
+                if op == "create" and method == "POST":
+                    return svc.create_site(uid, site)
+                raise HttpError(404, "not_found")
+            if method == "DELETE" and re.fullmatch(r"/sites/[a-z0-9-]{1,39}", sub):
                 return svc.delete_site(uid, sub[len("/sites/"):])
             if not svc.cfg.paypal_ready() and sub in ("/subscribe", "/cancel"):
                 raise HttpError(503, "paypal_not_configured")
@@ -1066,6 +1348,9 @@ def make_handler(svc):
 
         def do_DELETE(self):
             self.handle_any("DELETE")
+
+        def do_PUT(self):
+            self.handle_any("PUT")
 
         def do_OPTIONS(self):
             self.send_response(204)
