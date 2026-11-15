@@ -47,6 +47,23 @@ export async function api(path, { method = "GET", body, raw, token = true, onPro
 }
 
 export const $ = (sel, root = document) => root.querySelector(sel);
+
+// Aviso flotante: siempre visible aunque la persona esté abajo en la página. Los de error se quedan hasta cerrarlos.
+export function toast(cls, msg) {
+  let t = document.getElementById("toast-box");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "toast-box";
+    t.setAttribute("role", "status");
+    t.setAttribute("aria-live", "polite");
+    document.body.appendChild(t);
+  }
+  clearTimeout(t._timer);
+  t.innerHTML = `<div class="alert ${cls}"><span></span><button type="button" aria-label="Cerrar">✕</button></div>`;
+  t.querySelector("span").textContent = msg;
+  t.querySelector("button").onclick = () => t.remove();
+  if (cls !== "err") t._timer = setTimeout(() => t.remove(), 9000);
+}
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export function bytes(n) {

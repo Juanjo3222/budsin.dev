@@ -27,7 +27,7 @@
   </main>
   <script type="module">
 
-import { api, login, logout, onUser, $, esc, bytes, when, explain } from "./hosting.js";
+import { api, login, logout, onUser, toast, $, esc, bytes, when, explain } from "./hosting.js";
 const app = $("#app");
 let data = null;
 
@@ -86,7 +86,7 @@ function render(filter = "") {
 }
 
 async function action(kind, uid, extra) {
-  const note = (cls, msg) => { $("#notice").innerHTML = alertBox(cls, msg); window.scrollTo(0, 0); };
+  const note = (cls, msg) => toast(cls, msg);
   try {
     if (kind === "on") await api(`/admin/account/${uid}/power`, { method: "POST", body: { on: true } });
     else if (kind === "off") await api(`/admin/account/${uid}/power`, { method: "POST", body: { on: false } });

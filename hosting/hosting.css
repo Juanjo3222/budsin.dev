@@ -43,6 +43,10 @@
 .alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border: 1px solid; font-size: .92rem; }
 .alert.warn { background: #3a2a05; border-color: #78560a; color: #fcd34d; }
 .alert.err { background: #3b0d0d; border-color: #7f1d1d; color: #fca5a5; }
+#toast-box { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 1000; width: min(560px, calc(100vw - 24px)); }
+#toast-box .alert { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin: 0; box-shadow: 0 8px 28px rgba(0, 0, 0, .55); }
+#toast-box button { background: none; border: 0; color: inherit; font-size: 1rem; line-height: 1; cursor: pointer; opacity: .8; padding: 2px 4px; }
+#toast-box button:hover { opacity: 1; }
 .alert.ok { background: #0d2b17; border-color: #166534; color: #86efac; }
 
 .sites { list-style: none; }
