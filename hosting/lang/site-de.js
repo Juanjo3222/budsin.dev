@@ -65,7 +65,7 @@ export default {
   "s063": "Unsere Geschichte",
   "s064": "Budsin entstand als persönliches Projekt mit einer einfachen Idee: Software zu schaffen, die wirklich zählt. Was als Experimente in der Entwicklung mobiler Apps und Web-Spiele begann, wurde zur Leidenschaft, ausgefeilte, funktionale und nutzerzentrierte digitale Produkte zu bauen.",
   "s065": "Vom ersten Tag an stand Qualität vor Quantität im Mittelpunkt. Jede bei Google Play veröffentlichte App durchläuft einen strengen Prozess aus Design, Entwicklung und Tests. Jedes Spiel in unserem Webportal wird danach ausgewählt, ob es ein echtes, reibungsloses Unterhaltungserlebnis bietet.",
-  "s066": "Heute betreibt Budsin zwei Hauptplattformen: Android-Apps, die bei Google Play erhältlich sind, und ein Web-Spieleportal mit über 40 Titeln, die direkt im Browser spielbar sind.",
+  "s066": "Heute betreibt Budsin drei Plattformen: Android-Apps bei Google Play, ein Web-Spieleportal mit mehr als 40 Titeln, die direkt im Browser spielbar sind, und Budsin Hosting, einen Dienst, um deine eigene statische Website unter deinname.budsin.dev zu veröffentlichen.",
   "s067": "Unsere Mission",
   "s068": "Software zu schaffen, die Menschen gern benutzen. Wir glauben, dass die besten Apps und Spiele die sind, die keine Bedienungsanleitung brauchen — intuitiv, schnell und mit Absicht gestaltet.",
   "s069": "Qualität",
