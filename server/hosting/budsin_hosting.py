@@ -38,7 +38,6 @@ HOUR = 3600
 DAY = 24 * HOUR
 GRACE_SECONDS = 2 * DAY          # margen tras la fecha de cobro de PayPal
 FALLBACK_PERIOD = 32 * DAY
-FREE_COOLDOWN = 30 * DAY         # Free: un encendido cada 30 días
 TOKEN_TTL = 300
 MAX_FILES = 5000
 MAX_FILE_BYTES = 200 * 1024 * 1024
@@ -316,13 +315,11 @@ class Service:
         if acc["powered"]:
             raise HttpError(409, "already_on")
         plan = self.effective_plan(acc, now)
-        if plan == "free" and not forced and acc["last_free_on"] and now - acc["last_free_on"] < FREE_COOLDOWN:
-            raise HttpError(429, "free_cooldown", next_available=iso(acc["last_free_on"] + FREE_COOLDOWN))
         hours = PLANS[plan]["hours"]
         off_at = now + hours * HOUR if hours else 0
         self.store.run(
-            "UPDATE accounts SET powered=1, powered_since=?, off_at=?, warned=0, last_free_on=CASE WHEN ?='free' AND ?=0 THEN ? ELSE last_free_on END WHERE uid=?",
-            (now, off_at, plan, 1 if forced else 0, now, uid),
+            "UPDATE accounts SET powered=1, powered_since=?, off_at=?, warned=0 WHERE uid=?",
+            (now, off_at, uid),
         )
         self.set_flag(acc["username"], True)
         self.store.log(uid, "power_on" if not forced else "forced_on", (actor or "") + f" plan={plan}")
@@ -345,9 +342,6 @@ class Service:
         limit = p["gb"] * GB
         used = acc["used_bytes"]
         remaining = max(0, acc["off_at"] - now) if acc["powered"] and acc["off_at"] else None
-        cooldown = None
-        if plan == "free" and acc["last_free_on"] and now - acc["last_free_on"] < FREE_COOLDOWN and not acc["powered"]:
-            cooldown = iso(acc["last_free_on"] + FREE_COOLDOWN)
         warn = bool(acc["powered"] and acc["off_at"] and p["warn_hours"] and acc["off_at"] - now <= p["warn_hours"] * HOUR)
         sites = [
             {"name": s["name"], "bytes": s["bytes"], "files": s["files"], "updated": iso(s["updated"]),
@@ -365,7 +359,7 @@ class Service:
             "state": "on" if acc["powered"] else "off", "poweredSince": iso(acc["powered_since"]) if acc["powered"] else None,
             "offAt": iso(acc["off_at"]) if acc["powered"] and acc["off_at"] else None, "secondsLeft": remaining,
             "neverOff": bool(acc["powered"] and not acc["off_at"]),
-            "warning": warn, "freeNextOn": cooldown,
+            "warning": warn,
             "storage": {"used": used, "limit": limit, "percent": round(100 * used / limit, 1) if limit else 0,
                         "warn80": used >= 0.8 * limit, "full": used >= limit},
             "maxSites": p["sites"], "sites": sites, "history": hist,
@@ -793,6 +787,9 @@ class CountingReader:
         data = self.raw.read(size)
         self.n += len(data)
         return data
+
+    def __getattr__(self, name):  # readline, close, etc.: el resto va directo al lector real
+        return getattr(self.raw, name)
 
 
 def make_handler(svc):

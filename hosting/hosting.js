@@ -69,7 +69,7 @@ const ERRORS = {
   missing_token: "Inicia sesión para continuar.", invalid_token: "Tu sesión caducó. Vuelve a iniciar sesión.",
   username_taken: "Ese nombre ya está en uso.", already_registered: "Ya tienes una cuenta.",
   bad_username: "Nombre no válido.", already_on: "El servidor ya está encendido.", banned: "Esta cuenta está suspendida.",
-  free_cooldown: "El plan Free solo permite un encendido al mes.", storage_full: "Alcanzaste el límite de almacenamiento de tu plan.",
+  storage_full: "Alcanzaste el límite de almacenamiento de tu plan.",
   too_many_sites: "Alcanzaste el máximo de sitios de tu plan.", upload_too_large: "El .zip supera el tamaño máximo por subida.",
   bad_zip: "El archivo no es un .zip válido.", empty_zip: "El .zip está vacío.", unsafe_path: "El .zip contiene rutas no permitidas.",
   file_type_not_allowed: "El .zip contiene un tipo de archivo no permitido.", missing_index: "El .zip debe incluir un index.html.",

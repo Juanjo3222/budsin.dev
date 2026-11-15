@@ -150,7 +150,7 @@ class HostingTest(unittest.TestCase):
         self.assertEqual(call(self.base, "GET", "/me")[0], 401)
         self.assertEqual(call(self.base, "GET", "/me", "tok-falso")[0], 401)
 
-    # --- encendido, cuenta atrás y Free una vez al mes ---
+    # --- encendido y cuenta atrás ---
     def test_c_encendido_apagado_y_free(self):
         self.reg("tok-beto", "beto-web")
         code, me = call(self.base, "POST", "/power", "tok-beto", {"on": True})
@@ -161,17 +161,20 @@ class HostingTest(unittest.TestCase):
         me = call(self.base, "POST", "/power", "tok-beto", {"on": False})[1]
         self.assertEqual(me["state"], "off")
         self.assertFalse(os.path.exists(self.svc.flag_path("beto-web")))
-        code, body = call(self.base, "POST", "/power", "tok-beto", {"on": True})  # Free: segundo encendido en el mes
-        self.assertEqual((code, body["error"]), (429, "free_cooldown"))
-        self.assertTrue(body["next_available"])
+        # Free puede volver a encenderlo cuando quiera (sin límite mensual)
+        for _ in range(2):
+            code, me = call(self.base, "POST", "/power", "tok-beto", {"on": True})
+            self.assertEqual((code, me["state"]), (200, "on"))
+            self.assertAlmostEqual(me["secondsLeft"], 24 * 3600, delta=5)
+            self.assertEqual(call(self.base, "POST", "/power", "tok-beto", {"on": False})[1]["state"], "off")
         events = [h["event"] for h in call(self.base, "GET", "/me", "tok-beto")[1]["history"]]
-        self.assertEqual(events[:3], ["power_off", "power_on", "register"])
+        self.assertEqual(events[:3], ["power_off", "power_on", "power_off"])
+        self.assertNotIn("freeNextOn", call(self.base, "GET", "/me", "tok-beto")[1])
 
     def test_d_apagado_automatico_y_aviso(self):
         uid = "uid-ana"
         acc = self.svc.account(uid)
         if not acc["powered"]:
-            self.svc.store.run("UPDATE accounts SET last_free_on=0 WHERE uid=?", (uid,))
             self.svc.power_on(uid)
         now = int(time.time())
         self.svc.store.run("UPDATE accounts SET off_at=?, warned=0 WHERE uid=?", (now + 6 * 3600, uid))  # quedan 6 h (<12 h)
@@ -332,6 +335,35 @@ class HostingTest(unittest.TestCase):
         self.assertTrue(me["neverOff"])
         self.svc.tick()
         self.assertEqual(call(self.base, "GET", "/me", "tok-ana")[1]["state"], "on")
+
+    def test_s_conexion_persistente_sin_errores(self):
+        import http.client
+        errors = []
+        orig = sys.stderr
+        class Spy:
+            def write(self, s):
+                if "Traceback" in s or "Error" in s or "Exception" in s:
+                    errors.append(s)
+            def flush(self):
+                pass
+        sys.stderr = Spy()
+        try:
+            c = http.client.HTTPConnection("127.0.0.1", self.api.server_port)
+            for path in ("/api/hosting/plans", "/api/hosting/health", "/api/hosting/plans"):  # misma conexión
+                c.request("GET", path)
+                r = c.getresponse()
+                self.assertEqual(r.status, 200)
+                r.read()
+            c.request("POST", "/api/hosting/sites/x/upload", body=b"0" * 2000)  # sin sesión: error sin leer el cuerpo
+            r = c.getresponse()
+            self.assertEqual(r.status, 401)
+            self.assertEqual(r.getheader("Connection"), "close")
+            r.read()
+            c.close()
+            time.sleep(0.2)
+        finally:
+            sys.stderr = orig
+        self.assertEqual(errors, [])
 
     def test_r_cors_y_planes(self):
         code, body = call(self.base, "GET", "/plans")

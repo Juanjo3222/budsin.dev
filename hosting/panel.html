@@ -90,7 +90,6 @@ function render() {
   if (me.warning) banners.push(alertBox("warn", "Tu servidor se apagará pronto (" + when(me.offAt) + "). Tus archivos no se borran: podrás volver a encenderlo."));
   if (st.full) banners.push(alertBox("err", "Almacenamiento al 100 %: no puedes subir más archivos. Borra algún sitio o mejora tu plan."));
   else if (st.warn80) banners.push(alertBox("warn", "Has usado el " + st.percent + " % de tu almacenamiento."));
-  const cooldown = me.freeNextOn && !on ? `<p class="h-muted">Plan Free: podrás volver a encenderlo desde el ${esc(when(me.freeNextOn))}.</p>` : "";
   const barCls = st.full ? "full" : st.warn80 ? "warn" : "";
   app.innerHTML = `
     <div id="notice">${banners.join("")}</div>
@@ -108,7 +107,6 @@ function render() {
         <button class="btn btn-primary" id="on" ${on || me.banned ? "disabled" : ""}>Encender</button>
         <button class="btn btn-secondary" id="off" ${!on ? "disabled" : ""}>Apagar</button>
       </div>
-      ${cooldown}
     </div>
 
     <div class="h-card">
