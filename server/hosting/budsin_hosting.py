@@ -124,6 +124,7 @@ class Config:
         self.cf_token = env("CF_API_TOKEN")
         self.cf_zone = env("CF_ZONE_ID")
         self.cname_target = env("CUSTOM_CNAME_TARGET", "custom.budsin.dev").lower()
+        self.max_domains = int(env("MAX_DOMAINS", "100"))   # tope global: los primeros 100 hostnames de Cloudflare son gratis
         self.domains_dir = env("DOMAINS_DIR", "/var/www/hosting/domains")
         self.active_domains_dir = env("ACTIVE_DOMAINS_DIR", "/var/www/hosting/active-domains")
 
@@ -1062,6 +1063,8 @@ class Service:
         with self._domain_lock:
             if self.store.one("SELECT 1 FROM domains WHERE domain=?", (d,)):
                 raise HttpError(409, "domain_taken")
+            if self.store.one("SELECT COUNT(*) c FROM domains")["c"] >= self.cfg.max_domains:
+                raise HttpError(503, "domains_full")
             if self.store.one("SELECT COUNT(*) c FROM domains WHERE uid=?", (uid,))["c"] >= limit:
                 raise HttpError(409, "too_many_domains", max=limit)
             status, res = self.cf("POST", "/custom_hostnames", {

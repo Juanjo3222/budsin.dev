@@ -329,5 +329,6 @@ export default {
   "err.cloudflare_error": "Não foi possível contatar o provedor de domínios. Tente mais tarde.",
   "reason.domain.fmt": "digite apenas o domínio, por exemplo meudominio.com",
   "reason.domain.invalid": "domínio inválido",
-  "reason.domain.own": "os subdomínios de budsin.dev já estão incluídos; use um domínio próprio"
+  "reason.domain.own": "os subdomínios de budsin.dev já estão incluídos; use um domínio próprio",
+  "err.domains_full": "O serviço atingiu o limite de domínios por enquanto. Tente mais tarde."
 };

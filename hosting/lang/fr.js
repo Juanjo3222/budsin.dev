@@ -329,5 +329,6 @@ export default {
   "err.cloudflare_error": "Impossible de joindre le fournisseur de domaines. Réessayez plus tard.",
   "reason.domain.fmt": "saisissez uniquement le domaine, par exemple mondomaine.com",
   "reason.domain.invalid": "domaine non valide",
-  "reason.domain.own": "les sous-domaines de budsin.dev sont déjà inclus ; utilisez votre propre domaine"
+  "reason.domain.own": "les sous-domaines de budsin.dev sont déjà inclus ; utilisez votre propre domaine",
+  "err.domains_full": "Le service a atteint sa limite de domaines pour le moment. Réessayez plus tard."
 };

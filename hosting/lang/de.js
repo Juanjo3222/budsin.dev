@@ -329,5 +329,6 @@ export default {
   "err.cloudflare_error": "Der Domain-Anbieter ist nicht erreichbar. Versuche es später erneut.",
   "reason.domain.fmt": "gib nur die Domain ein, z. B. meinedomain.de",
   "reason.domain.invalid": "ungültige Domain",
-  "reason.domain.own": "budsin.dev-Subdomains sind bereits enthalten; verwende deine eigene Domain"
+  "reason.domain.own": "budsin.dev-Subdomains sind bereits enthalten; verwende deine eigene Domain",
+  "err.domains_full": "Der Dienst hat sein Domain-Limit vorerst erreicht. Versuche es später erneut."
 };

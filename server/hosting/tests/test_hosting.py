@@ -790,6 +790,10 @@ class HostingTest(unittest.TestCase):
         self.svc.tick()
         self.assertEqual(beto("GET", "/domains")[1]["domains"], [])
         self.assertEqual(CF_HOSTS, {})
+        # tope global
+        self.svc.cfg.max_domains = 0
+        self.assertEqual(beto("POST", "/domains", {"domain": "lleno.com", "site": "tienda2"})[1]["error"], "domains_full")
+        self.svc.cfg.max_domains = 100
         # sin configurar Cloudflare
         saved = self.svc.cfg.cf_token
         self.svc.cfg.cf_token = ""

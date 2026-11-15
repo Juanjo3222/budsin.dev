@@ -329,5 +329,6 @@ export default {
   "err.cloudflare_error": "Could not reach the domain provider. Try again later.",
   "reason.domain.fmt": "enter only the domain, for example mydomain.com",
   "reason.domain.invalid": "invalid domain",
-  "reason.domain.own": "budsin.dev subdomains are already included; use your own domain"
+  "reason.domain.own": "budsin.dev subdomains are already included; use your own domain",
+  "err.domains_full": "The service has reached its domain limit for now. Try again later."
 };
