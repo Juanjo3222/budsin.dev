@@ -281,3 +281,15 @@ img {
     grid-template-columns: 1fr;
   }
 }
+
+/* Selector de idioma y arranque sin parpadeo del español (ver hosting/i18n.js) */
+.lang-select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: .85rem; cursor: pointer; }
+.lang-select:focus-visible { outline: 2px solid var(--accent); }
+html.i18n-pending body { visibility: hidden; }
+
+/* En pantallas estrechas el menú pasa a varias líneas para que el selector de idioma no quede fuera de la pantalla */
+@media (max-width: 640px) {
+  .nav { height: auto; min-height: 56px; flex-wrap: wrap; padding: 8px 0; gap: 4px 12px; }
+  .nav-links { flex-wrap: wrap; gap: 6px 14px; justify-content: flex-end; align-items: center; }
+  main { padding-top: 56px; } /* la cabecera fija ahora puede ocupar más de una línea */
+}

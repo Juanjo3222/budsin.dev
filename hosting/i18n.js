@@ -37,9 +37,10 @@ export function detect() {
 }
 
 function applyStatic() {
-  document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
-  document.querySelectorAll("[data-i18n-html]").forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
-  document.querySelectorAll("[data-i18n-content]").forEach((el) => { el.setAttribute("content", t(el.dataset.i18nContent)); });
+  // Si una clave no existe en el idioma actual (p. ej. el español en el sitio principal), se deja el texto del HTML.
+  document.querySelectorAll("[data-i18n]").forEach((el) => { if (hasKey(el.dataset.i18n)) el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-html]").forEach((el) => { if (hasKey(el.dataset.i18nHtml)) el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll("[data-i18n-content]").forEach((el) => { if (hasKey(el.dataset.i18nContent)) el.setAttribute("content", t(el.dataset.i18nContent)); });
 }
 
 function mountSelector() {
@@ -59,10 +60,14 @@ function mountSelector() {
   nav.appendChild(sel);
 }
 
-export async function initI18n({ force, selector = true } = {}) {
+// site: true en las páginas del sitio principal (portada, acerca de, contacto, privacidad, términos): añade sus textos.
+export async function initI18n({ force, selector = true, site = false } = {}) {
   lang = force || detect();
   if (lang !== "es") {
-    try { dict = (await import(`./lang/${lang}.js`)).default; } catch (e) { lang = "es"; dict = ES; }
+    try {
+      dict = (await import(`./lang/${lang}.js`)).default;
+      if (site) dict = { ...dict, ...(await import(`./lang/site-${lang}.js`)).default };
+    } catch (e) { lang = "es"; dict = ES; }
   }
   document.documentElement.lang = lang;
   applyStatic();

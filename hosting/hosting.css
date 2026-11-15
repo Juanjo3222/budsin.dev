@@ -63,3 +63,7 @@
 html.i18n-pending body { visibility: hidden; }
 .pay-other { font-size: .78rem; color: var(--text-muted); margin-top: 12px; line-height: 1.5; }
 @media (max-width: 560px) { .h-table th:nth-child(n+4), .h-table td:nth-child(n+4) { display: none; } }
+
+/* Panel: menos aire arriba que las páginas de contenido; en móvil la cabecera fija puede ocupar más de una línea */
+.panel-main { padding-top: 32px; }
+@media (max-width: 640px) { .panel-main { padding-top: 88px; } }
