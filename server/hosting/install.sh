@@ -96,8 +96,9 @@ PY
   fi
 fi
 
-sleep 1
 echo "--- comprobación local"
+# El servicio tarda unos segundos en escuchar (al arrancar revisa las cuentas): se reintenta hasta 30 s.
+for _ in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:3102/api/hosting/health && break; sleep 1; done
 curl -s http://127.0.0.1:3102/api/hosting/health; echo
 curl -s -o /dev/null -w "budsin.dev /about (URL limpia) %{http_code}\n" -H "Host: budsin.dev" http://127.0.0.1:8080/about
 curl -s -o /dev/null -w "budsin.dev /api/hosting/plans %{http_code}\n" -H "Host: budsin.dev" http://127.0.0.1:8080/api/hosting/plans
