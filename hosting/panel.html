@@ -99,7 +99,8 @@ function histDetail(h) {
     const m = d.match(/→ (\d+)\/(\d+)(?: · (.*?))? · por /);
     if (m) return `${m[1]}/${m[2]}${m[3] ? " · " + m[3] : ""}`;
   }
-  return h.event === "delete_site" || h.event === "register" ? d : "";
+  if (h.event === "domain_removed") return d.split(" por ")[0];
+  return ["delete_site", "register", "domain_add", "domain_active", "domain_expired"].includes(h.event) ? d : "";
 }
 
 function render() {
@@ -159,6 +160,11 @@ function render() {
       <div class="bar" id="prog" style="margin-top:12px;display:none"><i></i></div>
     </div>
 
+    <div class="h-card" id="domcard">
+      <h2>${esc(t("dom.title"))} <span class="h-muted" id="dom-count"></span></h2>
+      <div id="dom-box"><p class="h-muted">…</p></div>
+    </div>
+
     <div class="h-card" id="planes">
       <h2>${esc(t("plan.title"))}</h2>
       <div id="plan-box"></div>
@@ -187,6 +193,7 @@ function render() {
   $("#out").onclick = (e) => { e.preventDefault(); logout(); };
   $("#rep").onclick = (e) => { e.preventDefault(); report(); };
   renderPlan();
+  renderDomains();
 }
 
 async function act(fn) {
@@ -221,6 +228,62 @@ async function createEmpty() {
   if (!site) return notice("err", t("up.need"));
   try { me = await api("/sites/" + encodeURIComponent(site) + "/create", { method: "POST" }); render(); notice("ok", t("fm.created")); }
   catch (e) { notice("err", explain(e)); }
+}
+
+// ----- dominios propios -----
+const domStatus = (s) => t("dom.status." + s);
+async function renderDomains() {
+  const box = $("#dom-box"), count = $("#dom-count");
+  if (!box) return;
+  let d;
+  try { d = await api("/domains"); } catch (e) { box.innerHTML = alertBox("err", explain(e)); return; }
+  if (!$("#dom-box")) return;
+  if (!d.limit) {
+    box.innerHTML = `<p class="h-muted">${esc(t("dom.free"))}</p><p style="margin-top:10px"><a class="btn btn-secondary h-btn-sm" href="#planes" id="dom-plans">${esc(t("dom.see"))}</a></p>`;
+    $("#dom-plans").onclick = () => $("#planes")?.scrollIntoView();
+    return;
+  }
+  count.textContent = t("dom.count", { n: d.used, max: d.limit });
+  if (!d.available) { box.innerHTML = `<p class="h-muted">${esc(t("dom.unavailable"))}</p>`; return; }
+  const rec = (r) => `<tr><td>${esc(r.type)}</td><td class="dom-v">${esc(r.name)}</td><td class="dom-v">${esc(r.value)}</td></tr>`;
+  const list = d.domains.map((x) => `<div class="dom-item">
+      <div class="h-row"><strong>${esc(x.domain)}</strong>
+        <span class="dom-st dom-${esc(x.status)}">${esc(domStatus(x.status))}</span></div>
+      <div class="h-muted">→ ${esc(x.site)}</div>
+      ${x.status === "active"
+        ? `<p class="h-muted" style="margin:8px 0">${esc(t("dom.live", { domain: x.domain }))}</p>`
+        : `<p class="h-muted" style="margin:8px 0">${esc(t("dom.step"))}</p>
+           <div class="h-scroll"><table class="hist"><thead><tr><th>${esc(t("dom.col.type"))}</th><th>${esc(t("dom.col.name"))}</th><th>${esc(t("dom.col.value"))}</th></tr></thead><tbody>${rec(x.cname)}</tbody></table></div>
+           <p class="h-muted" style="margin:8px 0">${esc(t("dom.apex"))}</p>
+           ${x.records.some((r) => r.purpose === "ownership") ? `<p class="h-muted">${esc(t("dom.txt"))}</p><div class="h-scroll"><table class="hist"><tbody>${x.records.filter((r) => r.purpose === "ownership").map(rec).join("")}</tbody></table></div>` : ""}
+           <p class="h-muted" style="margin:8px 0">${esc(t("dom.wait"))}</p>`}
+      <div class="h-row" style="justify-content:flex-start;margin-top:8px">
+        ${x.status === "active" ? "" : `<button class="btn btn-secondary h-btn-sm" data-dcheck="${esc(x.domain)}">${esc(t("dom.check"))}</button>`}
+        <button class="btn btn-danger h-btn-sm" data-drm="${esc(x.domain)}">${esc(t("dom.remove"))}</button></div>
+    </div>`).join("");
+  const sites = me.sites.map((s) => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("");
+  const form = d.used >= d.limit ? "" : me.sites.length
+    ? `<p class="h-muted" style="margin:10px 0">${esc(t("dom.help"))}</p>
+       <div class="h-row" style="justify-content:flex-start">
+         <input id="dom-name" class="h-input" placeholder="${esc(t("dom.ph"))}" maxlength="253" autocomplete="off" style="flex:1;min-width:180px">
+         <select id="dom-site" class="h-input" aria-label="${esc(t("dom.site"))}">${sites}</select>
+         <button class="btn btn-primary" id="dom-add">${esc(t("dom.add"))}</button></div>`
+    : `<p class="h-muted" style="margin-top:10px">${esc(t("dom.nosites"))}</p>`;
+  box.innerHTML = list + form;
+  document.querySelectorAll("[data-dcheck]").forEach((b) => b.onclick = async () => { b.disabled = true; try { await api("/domains/" + encodeURIComponent(b.dataset.dcheck) + "/check", { method: "POST" }); } catch (e) { notice("err", explain(e)); } renderDomains(); });
+  document.querySelectorAll("[data-drm]").forEach((b) => b.onclick = async () => {
+    if (!confirm(t("dom.confirm", { domain: b.dataset.drm }))) return;
+    try { await api("/domains/" + encodeURIComponent(b.dataset.drm), { method: "DELETE" }); notice("ok", t("dom.removed")); } catch (e) { notice("err", explain(e)); }
+    renderDomains();
+  });
+  const add = $("#dom-add");
+  if (add) add.onclick = async () => {
+    const domain = $("#dom-name").value.trim(), site = $("#dom-site").value;
+    if (!domain || !site) return notice("err", t("dom.need"));
+    add.disabled = true;
+    try { await api("/domains", { method: "POST", body: { domain, site } }); notice("ok", t("dom.added")); } catch (e) { notice("err", explain(e)); }
+    renderDomains();
+  };
 }
 
 async function report() {

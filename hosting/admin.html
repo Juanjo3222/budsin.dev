@@ -41,8 +41,8 @@ function loginView(msg) {
 
 async function load() {
   try {
-    const [a, r] = await Promise.all([api("/admin/accounts"), api("/admin/reports")]);
-    data = { ...a, reports: r.reports };
+    const [a, r, dm] = await Promise.all([api("/admin/accounts"), api("/admin/reports"), api("/admin/domains")]);
+    data = { ...a, reports: r.reports, domains: dm.domains };
     render();
   } catch (e) {
     app.innerHTML = alertBox("err", explain(e)) + '<p style="text-align:center"><a href="#" id="out" style="color:var(--accent)">Cerrar sesión</a></p>';
@@ -78,6 +78,9 @@ function render(filter = "") {
         </td></tr>`).join("") || '<tr><td colspan="5" class="h-muted">Sin resultados.</td></tr>'}
       </tbody></table></div></div>
     <div class="h-card" id="histbox" style="display:none"></div>
+    <div class="h-card"><h2>Dominios propios</h2>
+      ${data.domains.length ? '<table class="hist"><tbody>' + data.domains.map((d) => `<tr><td><a href="https://${esc(d.domain)}/" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">${esc(d.domain)}</a></td><td>${esc(d.status)}</td><td>${esc(d.email)} → ${esc(d.site)}</td><td>${esc(when(d.created))}</td><td><button class="btn btn-danger h-btn-sm" data-dm="${esc(d.domain)}">Quitar</button></td></tr>`).join("") + "</tbody></table>" : '<p class="h-muted">Ninguno.</p>'}
+    </div>
     <div class="h-card"><h2>Denuncias</h2>
       ${data.reports.length ? '<table class="hist"><tbody>' + data.reports.map((r) => `<tr><td>${esc(when(new Date(r.ts * 1000).toISOString()))}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">${esc(r.url)}</a></td><td>${esc(r.reason)}<br>${esc(r.contact || "")}</td><td>${r.status === "open" ? `<button class="btn btn-secondary h-btn-sm" data-r="${r.id}">Cerrar</button>` : esc(r.status)}</td></tr>`).join("") + "</tbody></table>" : '<p class="h-muted">No hay denuncias.</p>'}
     </div>
@@ -85,6 +88,11 @@ function render(filter = "") {
   $("#q").oninput = (e) => { const v = e.target.value; render(v); const el = $("#q"); el.focus(); el.setSelectionRange(v.length, v.length); };
   $("#out").onclick = (e) => { e.preventDefault(); logout(); };
   document.querySelectorAll("[data-a]").forEach((b) => b.onclick = () => action(b.dataset.a, b.dataset.u, b.dataset.b));
+  document.querySelectorAll("[data-dm]").forEach((b) => b.onclick = async () => {
+    if (!confirm("¿Quitar el dominio " + b.dataset.dm + "? Se borra también en Cloudflare.")) return;
+    try { await api("/admin/domains/remove", { method: "POST", body: { domain: b.dataset.dm } }); } catch (e) { toast("err", explain(e)); }
+    load();
+  });
   document.querySelectorAll("[data-r]").forEach((b) => b.onclick = async () => { await api("/admin/reports/" + b.dataset.r, { method: "POST", body: { status: "closed" } }); load(); });
 }
 

@@ -89,6 +89,6 @@ export function explain(err) {
   if (d.file) msg += t("err.file", { file: d.file + (d.ext ? " (" + d.ext + ")" : "") });
   if (d.reason) msg += " " + reason(d.reason) + ".";
   if (d.max && (err.code === "upload_too_large" || err.code === "file_too_large")) msg += t("err.max", { max: bytes(d.max) });
-  if (d.max && err.code === "too_many_sites") msg += t("err.max", { max: d.max });
+  if (d.max && (err.code === "too_many_sites" || err.code === "too_many_domains")) msg += t("err.max", { max: d.max });
   return msg;
 }
