@@ -133,7 +133,7 @@ function render() {
 
     <div class="h-card" id="planes">
       <h2>Mi plan</h2>
-      <div id="paypal"></div>
+      <div id="plan-box"></div>
     </div>
 
     <div class="h-card">
@@ -185,18 +185,19 @@ async function report() {
 }
 
 function loadPayPal(clientId) {
-  if (window.paypal) return Promise.resolve();
+  if (window.paypal && typeof window.paypal.Buttons === "function") return Promise.resolve();
   if (!ppLoaded) ppLoaded = new Promise((res, rej) => {
     const s = document.createElement("script");
     s.src = "https://www.paypal.com/sdk/js?client-id=" + encodeURIComponent(clientId) + "&vault=true&intent=subscription";
-    s.onload = res; s.onerror = () => { ppLoaded = null; rej(new Error("sdk")); };
+    s.onload = () => (window.paypal && typeof window.paypal.Buttons === "function" ? res() : (ppLoaded = null, rej(new Error("sdk"))));
+    s.onerror = () => { ppLoaded = null; rej(new Error("sdk")); };
     document.head.appendChild(s);
   });
   return ppLoaded;
 }
 
 async function renderPlan() {
-  const box = $("#paypal");
+  const box = $("#plan-box");
   if (!box) return;
   const cur = me.plan;
   let html = `<p>Plan actual: <strong>${esc(me.planName)}</strong>${me.planUntil ? " (hasta " + esc(when(me.planUntil)) + ")" : ""}.</p>`;
