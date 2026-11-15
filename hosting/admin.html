@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Administración — Budsin Hosting</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/hosting/hosting.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
+</head>
+<body>
+  <header class="header">
+    <div class="container">
+      <nav class="nav">
+        <a href="/" class="logo">Budsin</a>
+        <div class="nav-links">
+          <a href="/hosting/">Hosting</a>
+          <a href="/hosting/panel.html">Mi panel</a>
+          <a href="/contacto">Contacto</a>
+        </div>
+      </nav>
+    </div>
+  </header>
+  <main class="section" style="padding-top:32px">
+    <div class="h-wrap" id="app"><p class="h-muted" style="text-align:center;margin-top:40px">Cargando…</p></div>
+  </main>
+  <script type="module">
+
+import { api, login, logout, onUser, $, esc, bytes, when, explain } from "./hosting.js";
+const app = $("#app");
+let data = null;
+
+const alertBox = (cls, msg) => `<div class="alert ${cls}">${esc(msg)}</div>`;
+
+function loginView(msg) {
+  app.innerHTML = `<div class="h-card" style="text-align:center;max-width:460px;margin:40px auto"><h2>Administración</h2>
+    ${msg ? alertBox("err", msg) : ""}<button class="btn btn-primary" id="login">Iniciar sesión con Google</button></div>`;
+  $("#login").onclick = () => login();
+}
+
+async function load() {
+  try {
+    const [a, r] = await Promise.all([api("/admin/accounts"), api("/admin/reports")]);
+    data = { ...a, reports: r.reports };
+    render();
+  } catch (e) {
+    app.innerHTML = alertBox("err", explain(e)) + '<p style="text-align:center"><a href="#" id="out" style="color:var(--accent)">Cerrar sesión</a></p>';
+    $("#out").onclick = (ev) => { ev.preventDefault(); logout(); };
+  }
+}
+
+function render(filter = "") {
+  const q = filter.toLowerCase();
+  const rows = data.accounts.filter((a) => !q || a.username.includes(q) || (a.email || "").toLowerCase().includes(q));
+  const pct = Math.round((100 * data.totalUsed) / data.totalCap);
+  app.innerHTML = `
+    <div id="notice"></div>
+    <div class="h-card"><h2>Resumen</h2>
+      <p>${data.accounts.length} cuentas · ${data.accounts.filter((a) => a.state === "on").length} encendidas · espacio usado ${bytes(data.totalUsed)} de ${bytes(data.totalCap)} (${pct} %)</p>
+      <div class="bar ${pct > 90 ? "full" : pct > 75 ? "warn" : ""}" style="margin-top:8px"><i style="width:${Math.min(100, pct)}%"></i></div></div>
+    <div class="h-card"><div class="h-row"><h2 style="margin:0">Cuentas</h2><input class="h-input" id="q" placeholder="Buscar nombre o correo" value="${esc(filter)}"></div>
+      <div class="h-scroll"><table class="h-table"><thead><tr><th>Cuenta</th><th>Plan</th><th>Estado</th><th>Uso</th><th>Acciones</th></tr></thead><tbody>
+      ${rows.map((a) => `<tr>
+        <td><a href="https://${esc(a.username)}.budsin.dev/" target="_blank" rel="noopener" style="color:var(--accent)">${esc(a.username)}</a><br><span class="h-muted">${esc(a.email)}</span>${a.banned ? '<br><span style="color:#f87171">VETADA</span>' : ""}</td>
+        <td>${esc(a.plan)}${a.planUntil ? '<br><span class="h-muted">hasta ' + esc(when(a.planUntil)) + "</span>" : ""}</td>
+        <td>${a.state === "on" ? "🟢 on" : "⚪ off"}${a.offAt ? '<br><span class="h-muted">' + esc(when(a.offAt)) + "</span>" : ""}</td>
+        <td>${bytes(a.used)} / ${bytes(a.limit)}<br><span class="h-muted">${a.sites.length} sitios</span></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-secondary h-btn-sm" data-a="on" data-u="${esc(a.uid)}">Encender</button>
+          <button class="btn btn-secondary h-btn-sm" data-a="off" data-u="${esc(a.uid)}">Apagar</button>
+          <button class="btn btn-secondary h-btn-sm" data-a="plan" data-u="${esc(a.uid)}">Plan…</button>
+          <button class="btn btn-secondary h-btn-sm" data-a="hist" data-u="${esc(a.uid)}">Historial</button>
+          <button class="btn btn-danger h-btn-sm" data-a="ban" data-u="${esc(a.uid)}" data-b="${a.banned ? 0 : 1}">${a.banned ? "Levantar veto" : "Vetar"}</button>
+        </td></tr>`).join("") || '<tr><td colspan="5" class="h-muted">Sin resultados.</td></tr>'}
+      </tbody></table></div></div>
+    <div class="h-card" id="histbox" style="display:none"></div>
+    <div class="h-card"><h2>Denuncias</h2>
+      ${data.reports.length ? '<table class="hist"><tbody>' + data.reports.map((r) => `<tr><td>${esc(when(new Date(r.ts * 1000).toISOString()))}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">${esc(r.url)}</a></td><td>${esc(r.reason)}<br>${esc(r.contact || "")}</td><td>${r.status === "open" ? `<button class="btn btn-secondary h-btn-sm" data-r="${r.id}">Cerrar</button>` : esc(r.status)}</td></tr>`).join("") + "</tbody></table>" : '<p class="h-muted">No hay denuncias.</p>'}
+    </div>
+    <p class="h-footer-note"><a href="#" id="out" style="color:var(--accent)">Cerrar sesión</a></p>`;
+  $("#q").oninput = (e) => { const v = e.target.value; render(v); const el = $("#q"); el.focus(); el.setSelectionRange(v.length, v.length); };
+  $("#out").onclick = (e) => { e.preventDefault(); logout(); };
+  document.querySelectorAll("[data-a]").forEach((b) => b.onclick = () => action(b.dataset.a, b.dataset.u, b.dataset.b));
+  document.querySelectorAll("[data-r]").forEach((b) => b.onclick = async () => { await api("/admin/reports/" + b.dataset.r, { method: "POST", body: { status: "closed" } }); load(); });
+}
+
+async function action(kind, uid, extra) {
+  const note = (cls, msg) => { $("#notice").innerHTML = alertBox(cls, msg); window.scrollTo(0, 0); };
+  try {
+    if (kind === "on") await api(`/admin/account/${uid}/power`, { method: "POST", body: { on: true } });
+    else if (kind === "off") await api(`/admin/account/${uid}/power`, { method: "POST", body: { on: false } });
+    else if (kind === "ban") {
+      if (extra === "1" && !confirm("¿Vetar esta cuenta? Se apagará y no podrá encender su sitio.")) return;
+      await api(`/admin/account/${uid}/ban`, { method: "POST", body: { banned: extra === "1" } });
+    } else if (kind === "plan") {
+      const plan = prompt("Plan (free, plus, pro, ultra):");
+      if (!plan) return;
+      const days = plan === "free" ? 0 : Number(prompt("Días de duración:", "30"));
+      await api(`/admin/account/${uid}/plan`, { method: "POST", body: { plan: plan.trim().toLowerCase(), days } });
+    } else if (kind === "hist") {
+      const h = await api("/admin/history?uid=" + encodeURIComponent(uid));
+      const box = $("#histbox");
+      box.style.display = "";
+      box.innerHTML = '<h2>Historial</h2><table class="hist"><tbody>' + h.history.map((x) => `<tr><td>${esc(when(x.ts))}</td><td>${esc(x.event)}</td><td>${esc(x.detail || "")}</td></tr>`).join("") + "</tbody></table>";
+      return box.scrollIntoView();
+    }
+    await load();
+  } catch (e) { note("err", explain(e)); }
+}
+
+onUser((user) => (user ? load() : loginView()));
+
+  </script>
+</body>
+</html>

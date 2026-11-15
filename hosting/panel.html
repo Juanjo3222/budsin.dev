@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi panel — Budsin Hosting</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/hosting/hosting.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
+</head>
+<body>
+  <header class="header">
+    <div class="container">
+      <nav class="nav">
+        <a href="/" class="logo">Budsin</a>
+        <div class="nav-links">
+          <a href="/hosting/">Hosting</a>
+          <a href="/hosting/panel.html">Mi panel</a>
+          <a href="/contacto">Contacto</a>
+        </div>
+      </nav>
+    </div>
+  </header>
+  <main class="section" style="padding-top:32px">
+    <div class="h-wrap" id="app"><p class="h-muted" style="text-align:center;margin-top:40px">Cargando…</p></div>
+  </main>
+  <script type="module">
+
+import { api, login, logout, onUser, auth, $, esc, bytes, duration, when, explain } from "./hosting.js";
+
+const app = $("#app");
+let me = null, plans = null, timer = null, ppLoaded = null;
+
+const alertBox = (cls, msg) => `<div class="alert ${cls}">${esc(msg)}</div>`;
+const notice = (cls, msg) => { const n = $("#notice"); if (n) n.innerHTML = alertBox(cls, msg); };
+
+function loginView() {
+  app.innerHTML = `<div class="h-card" style="text-align:center;max-width:460px;margin:40px auto">
+    <h2>Panel de Budsin Hosting</h2>
+    <p class="h-muted" style="margin-bottom:18px">Inicia sesión con Google para crear tu cuenta y gestionar tus sitios.</p>
+    <button class="btn btn-primary" id="login">Iniciar sesión con Google</button>
+    <div id="notice" style="margin-top:14px"></div></div>`;
+  $("#login").onclick = () => login().catch(() => notice("err", "No se pudo iniciar sesión."));
+}
+
+function registerView(email) {
+  app.innerHTML = `<div class="h-card" style="max-width:520px;margin:30px auto">
+    <h2>Elige el nombre de tu sitio</h2>
+    <p class="h-muted" style="margin-bottom:14px">Será tu dirección: <strong id="pre">tunombre</strong>.budsin.dev. No se podrá cambiar después.</p>
+    <div class="h-row" style="justify-content:flex-start">
+      <input id="name" class="h-input" maxlength="30" placeholder="tunombre" autocomplete="off" style="flex:1">
+      <button class="btn btn-primary" id="go" disabled>Crear cuenta</button>
+    </div>
+    <p class="h-muted" id="hint" style="margin-top:10px">3 a 30 letras minúsculas, números o guiones.</p>
+    <p class="h-muted" style="margin-top:10px">Al crear la cuenta aceptas las <a href="/hosting/terminos.html" style="color:var(--accent)">normas de uso</a>.</p>
+    <div id="notice" style="margin-top:12px"></div>
+    <p class="h-muted" style="margin-top:14px">Sesión: ${esc(email)} · <a href="#" id="out" style="color:var(--accent)">Cerrar sesión</a></p></div>`;
+  const input = $("#name"), go = $("#go"), hint = $("#hint");
+  let t;
+  input.oninput = () => {
+    $("#pre").textContent = input.value || "tunombre";
+    go.disabled = true;
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      const v = input.value.trim().toLowerCase();
+      if (!v) return;
+      try {
+        const r = await api("/check-name?username=" + encodeURIComponent(v), { token: false });
+        hint.textContent = r.ok ? "✓ Disponible" : "✗ " + r.reason;
+        hint.style.color = r.ok ? "#86efac" : "#fca5a5";
+        go.disabled = !r.ok;
+      } catch (e) { hint.textContent = explain(e); }
+    }, 350);
+  };
+  go.onclick = async () => {
+    go.disabled = true;
+    try { me = await api("/register", { method: "POST", body: { username: input.value.trim().toLowerCase() } }); render(); }
+    catch (e) { notice("err", explain(e)); go.disabled = false; }
+  };
+  $("#out").onclick = (e) => { e.preventDefault(); logout(); };
+}
+
+function render() {
+  clearInterval(timer);
+  const on = me.state === "on";
+  const st = me.storage;
+  const banners = [];
+  if (me.banned) banners.push(alertBox("err", "Tu cuenta está suspendida. Escribe a budsinjys@gmail.com si crees que es un error."));
+  if (me.warning) banners.push(alertBox("warn", "Tu servidor se apagará pronto (" + when(me.offAt) + "). Tus archivos no se borran: podrás volver a encenderlo."));
+  if (st.full) banners.push(alertBox("err", "Almacenamiento al 100 %: no puedes subir más archivos. Borra algún sitio o mejora tu plan."));
+  else if (st.warn80) banners.push(alertBox("warn", "Has usado el " + st.percent + " % de tu almacenamiento."));
+  const cooldown = me.freeNextOn && !on ? `<p class="h-muted">Plan Free: podrás volver a encenderlo desde el ${esc(when(me.freeNextOn))}.</p>` : "";
+  const barCls = st.full ? "full" : st.warn80 ? "warn" : "";
+  app.innerHTML = `
+    <div id="notice">${banners.join("")}</div>
+    <div class="h-card">
+      <div class="h-row">
+        <div>
+          <div class="state ${on ? "on" : ""}"><span class="dot"></span><span>${on ? "Encendido" : "Apagado"}</span></div>
+          <div class="h-muted" style="margin-top:4px">${esc(me.username)}.budsin.dev · Plan <strong>${esc(me.planName)}</strong>${me.planUntil ? " hasta " + esc(when(me.planUntil)) : ""}</div>
+        </div>
+        <div style="text-align:right">
+          ${on ? (me.neverOff ? '<div class="clock">∞</div><div class="h-muted">No se apaga</div>' : '<div class="clock" id="clock">--</div><div class="h-muted">hasta el apagado</div>') : ""}
+        </div>
+      </div>
+      <div class="h-row" style="margin-top:16px;justify-content:flex-start">
+        <button class="btn btn-primary" id="on" ${on || me.banned ? "disabled" : ""}>Encender</button>
+        <button class="btn btn-secondary" id="off" ${!on ? "disabled" : ""}>Apagar</button>
+      </div>
+      ${cooldown}
+    </div>
+
+    <div class="h-card">
+      <h2>Almacenamiento</h2>
+      <div class="bar ${barCls}"><i style="width:${Math.min(100, st.percent)}%"></i></div>
+      <p class="h-muted" style="margin-top:8px">${bytes(st.used)} de ${bytes(st.limit)} (${st.percent} %)</p>
+    </div>
+
+    <div class="h-card">
+      <h2>Mis sitios <span class="h-muted">(${me.sites.length} de ${me.maxSites})</span></h2>
+      <ul class="sites" id="sites">${me.sites.length ? me.sites.map((s) => `<li>
+        <span><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a><br><span class="h-muted">${bytes(s.bytes)} · ${s.files} archivos · ${esc(when(s.updated))}</span></span>
+        <button class="btn btn-danger h-btn-sm" data-del="${esc(s.name)}">Borrar</button></li>`).join("") : '<li class="h-muted">Todavía no tienes sitios.</li>'}</ul>
+      <h2 style="margin-top:20px">Subir o reemplazar un sitio</h2>
+      <p class="h-muted" style="margin-bottom:10px">Sube un .zip con tu sitio (con <em>index.html</em> en la raíz). Si el nombre ya existe, se reemplaza su contenido. Máximo ${plans ? plans.maxUploadMb : 95} MB por subida.</p>
+      <div class="h-row" style="justify-content:flex-start">
+        <input id="site" class="h-input" placeholder="nombre-del-sitio" maxlength="39" style="width:200px">
+        <input id="zip" type="file" accept=".zip,application/zip" class="h-input">
+        <button class="btn btn-primary" id="up">Subir</button>
+      </div>
+      <div class="bar" id="prog" style="margin-top:12px;display:none"><i></i></div>
+    </div>
+
+    <div class="h-card" id="planes">
+      <h2>Mi plan</h2>
+      <div id="paypal"></div>
+    </div>
+
+    <div class="h-card">
+      <h2>Historial</h2>
+      <div class="h-scroll"><table class="hist"><tbody>${me.history.map((h) => `<tr><td>${esc(when(h.ts))}</td><td>${esc(h.event)}</td><td>${esc(h.detail || "")}</td></tr>`).join("")}</tbody></table></div>
+    </div>
+    <p class="h-footer-note">Sesión: ${esc(me.email)} · <a href="#" id="out" style="color:var(--accent)">Cerrar sesión</a> · <a href="#" id="rep" style="color:var(--accent)">Denunciar un sitio</a> · <a href="/hosting/terminos.html" style="color:var(--accent)">Normas de uso</a></p>`;
+
+  const clock = $("#clock");
+  if (clock && me.secondsLeft != null) {
+    const end = Date.now() + me.secondsLeft * 1000;
+    const tick = () => { const left = (end - Date.now()) / 1000; clock.textContent = duration(left); if (left <= 0) refresh(); };
+    tick(); timer = setInterval(tick, 1000);
+  }
+  $("#on").onclick = () => act(() => api("/power", { method: "POST", body: { on: true } }));
+  $("#off").onclick = () => act(() => api("/power", { method: "POST", body: { on: false } }));
+  document.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+    if (confirm("¿Borrar el sitio «" + b.dataset.del + "»? Esta acción no se puede deshacer.")) act(() => api("/sites/" + b.dataset.del, { method: "DELETE" }));
+  });
+  $("#up").onclick = upload;
+  $("#out").onclick = (e) => { e.preventDefault(); logout(); };
+  $("#rep").onclick = (e) => { e.preventDefault(); report(); };
+  renderPlan();
+}
+
+async function act(fn) {
+  try { me = await fn(); render(); } catch (e) { notice("err", explain(e)); }
+}
+async function refresh() { try { me = await api("/me"); render(); } catch (e) {} }
+
+async function upload() {
+  const site = $("#site").value.trim().toLowerCase(), file = $("#zip").files[0];
+  if (!site || !file) return notice("err", "Escribe un nombre de sitio y elige un .zip.");
+  const prog = $("#prog"), bar = prog.firstElementChild, btn = $("#up");
+  prog.style.display = ""; btn.disabled = true; bar.style.width = "0";
+  try {
+    me = await api("/sites/" + encodeURIComponent(site) + "/upload", { method: "POST", raw: file, onProgress: (p) => (bar.style.width = Math.round(p * 100) + "%") });
+    render(); notice("ok", "Sitio publicado. Recuerda encender el servidor para que se vea.");
+  } catch (e) { notice("err", explain(e)); btn.disabled = false; prog.style.display = "none"; }
+}
+
+async function report() {
+  const url = prompt("Dirección del sitio que quieres denunciar:");
+  if (!url) return;
+  const reason = prompt("¿Qué incumple las normas?");
+  if (!reason) return;
+  try { await api("/report", { method: "POST", body: { url, reason, contact: me.email }, token: false }); notice("ok", "Denuncia enviada. Gracias."); }
+  catch (e) { notice("err", explain(e)); }
+}
+
+function loadPayPal(clientId) {
+  if (window.paypal) return Promise.resolve();
+  if (!ppLoaded) ppLoaded = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://www.paypal.com/sdk/js?client-id=" + encodeURIComponent(clientId) + "&vault=true&intent=subscription";
+    s.onload = res; s.onerror = () => { ppLoaded = null; rej(new Error("sdk")); };
+    document.head.appendChild(s);
+  });
+  return ppLoaded;
+}
+
+async function renderPlan() {
+  const box = $("#paypal");
+  if (!box) return;
+  const cur = me.plan;
+  let html = `<p>Plan actual: <strong>${esc(me.planName)}</strong>${me.planUntil ? " (hasta " + esc(when(me.planUntil)) + ")" : ""}.</p>`;
+  if (!plans || !plans.paypal.ready) {
+    box.innerHTML = html + '<p class="h-muted" style="margin-top:8px">Los planes de pago estarán disponibles muy pronto.</p>';
+    return;
+  }
+  const sandbox = plans.paypal.sandbox ? alertBox("warn", "Modo de pruebas (Sandbox): no se cobra dinero real.") : "";
+  const paid = plans.plans.filter((p) => p.id !== "free");
+  html += sandbox + '<div class="plans">' + paid.map((p) => `<div class="plan ${p.id === cur ? "featured" : ""}">
+      <h3>${esc(p.name)}</h3><div class="price">$${p.price.toFixed(2)} <small>/ mes</small></div>
+      <ul><li>${p.gb} GB</li><li>${p.hours ? "Se apaga a los " + p.hours / 24 + " días" : "Nunca se apaga"}</li><li>Hasta ${p.sites} sitios</li></ul>
+      ${p.id === cur ? '<div class="h-muted">Tu plan actual</div>' : `<div id="pp-${p.id}"></div>`}</div>`).join("") + "</div>";
+  if (cur !== "free") html += '<button class="btn btn-danger h-btn-sm" id="cancelsub">Cancelar suscripción</button> <span class="h-muted">El plan sigue activo hasta el final del periodo pagado.</span>';
+  box.innerHTML = html;
+  const cancel = $("#cancelsub");
+  if (cancel) cancel.onclick = () => confirm("¿Cancelar tu suscripción? Dejará de cobrarse y tu plan seguirá hasta el final del periodo pagado.") && act(() => api("/cancel", { method: "POST" }));
+  try { await loadPayPal(plans.paypal.clientId); } catch (e) { return notice("warn", "No se pudo cargar PayPal (¿bloqueador de anuncios?)."); }
+  for (const p of paid) {
+    const el = $("#pp-" + p.id);
+    if (!el) continue;
+    window.paypal.Buttons({
+      style: { shape: "pill", color: "gold", layout: "vertical", label: "subscribe", height: 38 },
+      createSubscription: (d, actions) => actions.subscription.create({ plan_id: plans.paypal.plans[p.id], custom_id: auth.currentUser.uid }),
+      onApprove: async (data) => {
+        notice("ok", "Confirmando tu pago…");
+        try {
+          for (let i = 0; i < 5; i++) {
+            me = await api("/subscribe", { method: "POST", body: { subscriptionId: data.subscriptionID } });
+            if (me.plan === p.id) break;
+            await new Promise((r) => setTimeout(r, 2500));
+          }
+          render(); notice(me.plan === p.id ? "ok" : "warn", me.plan === p.id ? "¡Gracias! Tu plan " + me.planName + " está activo." : "Pago recibido. En unos minutos se activará tu plan.");
+        } catch (e) { notice("err", explain(e)); }
+      },
+      onError: () => notice("err", "No se pudo completar el pago con PayPal."),
+    }).render(el);
+  }
+}
+
+onUser(async (user) => {
+  if (!user) return loginView();
+  app.innerHTML = '<p class="h-muted" style="text-align:center;margin-top:40px">Cargando…</p>';
+  try {
+    plans = await api("/plans", { token: false });
+    const r = await api("/me");
+    if (r.registered === false) return registerView(user.email);
+    me = r; render();
+    if (location.hash === "#planes") $("#planes")?.scrollIntoView();
+  } catch (e) {
+    app.innerHTML = alertBox("err", explain(e)) + '<p style="text-align:center"><a href="#" id="out" style="color:var(--accent)">Cerrar sesión</a></p>';
+    $("#out").onclick = (ev) => { ev.preventDefault(); logout(); };
+  }
+});
+
+  </script>
+</body>
+</html>

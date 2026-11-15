@@ -1,0 +1,31 @@
+
+# Budsin Hosting: sitios de usuarios en usuario.budsin.dev (los hosts con nombre propio ganan al comodín)
+http://*.budsin.dev:8080 {
+	bind 127.0.0.1
+	# Un sitio solo se sirve si existe su archivo-bandera: encender = crearlo, apagar = borrarlo.
+	@on file {
+		root /var/www/hosting/active
+		try_files {http.request.host.labels.2}
+	}
+	handle @on {
+		root * /var/www/hosting/sites/{http.request.host.labels.2}
+		encode gzip zstd
+		header {
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "strict-origin-when-cross-origin"
+		}
+		file_server
+	}
+	handle {
+		root * /var/www/hosting
+		rewrite * /off.html
+		header Cache-Control "no-store"
+		file_server {
+			status 503
+		}
+	}
+	log {
+		output file /var/log/caddy/hosting-access.log
+		format json
+	}
+}

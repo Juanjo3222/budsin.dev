@@ -1,0 +1,57 @@
+/* Budsin Hosting: complementa /styles.css (tema oscuro). Sin dependencias. */
+.h-wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+.h-hero { padding: 72px 0 36px; text-align: center; }
+.h-hero h1 { font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -.02em; }
+.h-hero p { color: var(--text-muted); max-width: 640px; margin: 14px auto 26px; }
+.h-badge { display: inline-block; padding: 4px 12px; border: 1px solid var(--border); border-radius: 99px; color: var(--accent); font-size: .8rem; margin-bottom: 16px; }
+
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin: 28px 0; }
+.plan { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; }
+.plan.featured { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.plan h3 { font-size: 1.1rem; }
+.plan .price { font-size: 2rem; font-weight: 700; margin: 10px 0 2px; }
+.plan .price small { font-size: .85rem; color: var(--text-muted); font-weight: 400; }
+.plan ul { list-style: none; margin: 14px 0 18px; color: var(--text-muted); font-size: .92rem; flex: 1; }
+.plan li { padding: 4px 0; }
+.plan li::before { content: "✓ "; color: var(--accent); }
+.plan .btn { justify-content: center; }
+
+.h-table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: .93rem; }
+.h-table th, .h-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+.h-table th { color: var(--text-muted); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+.h-scroll { overflow-x: auto; }
+
+.h-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 16px; }
+.h-card h2 { font-size: 1.05rem; margin-bottom: 12px; }
+.h-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.h-muted { color: var(--text-muted); font-size: .9rem; }
+.h-input { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font: inherit; min-width: 0; }
+.h-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.h-btn-sm { padding: 8px 14px; font-size: .85rem; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; transform: none; }
+.btn-danger { background: transparent; color: #f87171; border: 1px solid #7f1d1d; }
+
+.state { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.25rem; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: #71717a; }
+.on .dot { background: #4ade80; box-shadow: 0 0 10px #4ade80; }
+.clock { font-variant-numeric: tabular-nums; font-size: 1.6rem; font-weight: 700; }
+.bar { height: 10px; background: var(--bg); border-radius: 99px; overflow: hidden; border: 1px solid var(--border); }
+.bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+.bar.warn > i { background: #fbbf24; }
+.bar.full > i { background: #f87171; }
+
+.alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; border: 1px solid; font-size: .92rem; }
+.alert.warn { background: #3a2a05; border-color: #78560a; color: #fcd34d; }
+.alert.err { background: #3b0d0d; border-color: #7f1d1d; color: #fca5a5; }
+.alert.ok { background: #0d2b17; border-color: #166534; color: #86efac; }
+
+.sites { list-style: none; }
+.sites li { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.sites a { color: var(--accent); word-break: break-all; }
+.hist { width: 100%; font-size: .85rem; border-collapse: collapse; }
+.hist td { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+.hist td:nth-child(2) { color: var(--text); white-space: nowrap; }
+.h-faq h3 { margin: 18px 0 6px; font-size: 1rem; }
+.h-faq p { color: var(--text-muted); font-size: .93rem; }
+.h-footer-note { text-align: center; color: var(--text-muted); font-size: .85rem; padding: 24px 0; }
+@media (max-width: 560px) { .h-table th:nth-child(n+4), .h-table td:nth-child(n+4) { display: none; } }

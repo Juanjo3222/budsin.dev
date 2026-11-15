@@ -1,0 +1,21 @@
+[Unit]
+Description=Budsin Hosting - sitios estáticos con planes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=budsin-hosting
+Group=budsin-hosting
+UMask=0022
+EnvironmentFile=/etc/budsin-hosting.env
+ExecStart=/usr/bin/python3 /opt/budsin-hosting/budsin_hosting.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/budsin-hosting /var/www/hosting
+
+[Install]
+WantedBy=multi-user.target
