@@ -47,14 +47,15 @@ SCAN_BYTES = 2 * 1024 * 1024
 # file_mb / upload_mb: tope por archivo y por subida (None = el máximo del servidor). badge: insignia en los .html.
 PLANS = {
     "free":  {"name": "Free",  "gb": 1,  "hours": 12,      "warn_hours": 3,  "price": 0.00, "sites": 1,
-              "file_mb": 15, "upload_mb": 40, "badge": True},
+              "file_mb": 15, "upload_mb": 40, "badge": True, "domains": 0},
     "plus":  {"name": "Plus",  "gb": 5,  "hours": 5 * 24,  "warn_hours": 24, "price": 1.99, "sites": 10,
-              "file_mb": None, "upload_mb": None, "badge": False},
+              "file_mb": None, "upload_mb": None, "badge": False, "domains": 1},
     "pro":   {"name": "Pro",   "gb": 10, "hours": 14 * 24, "warn_hours": 24, "price": 3.99, "sites": 25,
-              "file_mb": None, "upload_mb": None, "badge": False},
+              "file_mb": None, "upload_mb": None, "badge": False, "domains": 3},
     "ultra": {"name": "Ultra", "gb": 15, "hours": None,    "warn_hours": 0,  "price": 6.99, "sites": 50,
-              "file_mb": None, "upload_mb": None, "badge": False},
+              "file_mb": None, "upload_mb": None, "badge": False, "domains": 10},
 }
+DOMAIN_PENDING_DAYS = 7   # un dominio sin verificar libera su nombre pasado este tiempo
 PURGE_DAYS = 90        # los sitios del plan Free que llevan tanto tiempo apagados se borran
 PURGE_WARN_DAYS = 60   # desde aquí se avisa en el panel y el historial
 BADGE_START, BADGE_END = "<!--budsin-badge-->", "<!--/budsin-badge-->"
@@ -118,9 +119,19 @@ class Config:
         self.paypal_secret = env("PAYPAL_SECRET")
         self.paypal_webhook = env("PAYPAL_WEBHOOK_ID")
         self.paypal_plans = {p: env("PAYPAL_PLAN_" + p.upper()) for p in ("plus", "pro", "ultra")}
+        # Dominios propios (Cloudflare for SaaS: Custom Hostnames)
+        self.cf_api = env("CF_API_BASE", "https://api.cloudflare.com/client/v4").rstrip("/")
+        self.cf_token = env("CF_API_TOKEN")
+        self.cf_zone = env("CF_ZONE_ID")
+        self.cname_target = env("CUSTOM_CNAME_TARGET", "custom.budsin.dev").lower()
+        self.domains_dir = env("DOMAINS_DIR", "/var/www/hosting/domains")
+        self.active_domains_dir = env("ACTIVE_DOMAINS_DIR", "/var/www/hosting/active-domains")
 
     def auth_ready(self):
         return bool(self.firebase_key)
+
+    def domains_ready(self):
+        return bool(self.cf_token and self.cf_zone)
 
     def paypal_ready(self):
         return bool(self.paypal_client and self.paypal_secret and all(self.paypal_plans.values()))
@@ -204,6 +215,11 @@ class Store:
                     id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT NOT NULL, ts INTEGER NOT NULL,
                     delta INTEGER NOT NULL, total INTEGER NOT NULL, reason TEXT, actor TEXT);
                 CREATE INDEX IF NOT EXISTS strikes_uid ON strikes(uid, id);
+                CREATE TABLE IF NOT EXISTS domains (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT NOT NULL, site TEXT NOT NULL,
+                    domain TEXT UNIQUE NOT NULL, status TEXT NOT NULL DEFAULT 'pending', cf_id TEXT,
+                    info TEXT NOT NULL DEFAULT '{}', created INTEGER NOT NULL, checked INTEGER NOT NULL DEFAULT 0);
+                CREATE INDEX IF NOT EXISTS domains_uid ON domains(uid, id);
                 CREATE TABLE IF NOT EXISTS subs (
                     sub_id TEXT PRIMARY KEY, uid TEXT NOT NULL, plan TEXT NOT NULL, status TEXT,
                     paid_until INTEGER NOT NULL DEFAULT 0, last_checked INTEGER NOT NULL DEFAULT 0,
@@ -256,13 +272,14 @@ class Service:
     def __init__(self, cfg):
         self.cfg = cfg
         self.store = Store(os.path.join(cfg.data_dir, "hosting.sqlite3"))
-        for d in (cfg.sites_dir, cfg.active_dir):
+        for d in (cfg.sites_dir, cfg.active_dir, cfg.domains_dir, cfg.active_domains_dir):
             os.makedirs(d, mode=0o755, exist_ok=True)
         self._tokens = {}
         self._buckets = {"api": {}, "upload": {}, "files": {}}
         self._pp_token = ("", 0)
         self._lock = threading.Lock()
         self._upload_lock = threading.Lock()
+        self._domain_lock = threading.Lock()
 
     # ---------- identidad ----------
     def verify_user(self, bearer):
@@ -372,6 +389,7 @@ class Service:
         )
         self.set_flag(acc["username"], True)
         self.store.log(uid, "power_on" if not forced else "forced_on", (actor or "") + f" plan={plan}")
+        self.sync_domains()
         return self.me(uid)
 
     def power_off(self, uid, event="power_off", detail=""):
@@ -382,6 +400,7 @@ class Service:
                        (int(time.time()), uid))
         self.set_flag(acc["username"], False)
         self.store.log(uid, event, detail)
+        self.sync_domains()
         return self.me(uid)
 
     def purge_time(self, acc, plan, now=None):
@@ -426,7 +445,7 @@ class Service:
             "badge": PLANS[plan]["badge"], "fileMb": PLANS[plan]["file_mb"], "uploadMb": round(self.upload_limit(plan) / 1024 / 1024),
             "storage": {"used": used, "limit": limit, "percent": round(100 * used / limit, 1) if limit else 0,
                         "warn80": used >= 0.8 * limit, "full": used >= limit},
-            "maxSites": p["sites"], "sites": sites, "history": hist,
+            "maxSites": p["sites"], "domainsLimit": p["domains"], "sites": sites, "history": hist,
             "paypalReady": self.cfg.paypal_ready(),
         }
 
@@ -632,6 +651,7 @@ class Service:
                         with contextlib.suppress(OSError):
                             (self.brand_file if want else self.unbrand_file)(path)
         self.refresh_usage(uid, acc["username"])
+        self.sync_domains()
 
     def scan_file(self, path, rel, ext):
         with open(path, "rb") as fh:
@@ -895,6 +915,7 @@ class Service:
         acc = self.need_account(uid)
         if not self.store.one("SELECT 1 FROM sites WHERE uid=? AND name=?", (uid, site)):
             raise HttpError(404, "no_site")
+        self.drop_site_domains(uid, site)
         shutil.rmtree(os.path.join(self.cfg.sites_dir, acc["username"], site), ignore_errors=True)
         self.store.run("DELETE FROM sites WHERE uid=? AND name=?", (uid, site))
         self.refresh_usage(uid, acc["username"])
@@ -918,6 +939,7 @@ class Service:
             if acc["powered"] and not acc["off_at"]:
                 self.store.run("UPDATE accounts SET off_at=? WHERE uid=?", (now + PLANS["free"]["hours"] * HOUR, acc["uid"]))
         self.lift_expired_bans(now)
+        self.poll_domains(now)
         self.purge_abandoned(now)
         self.reconcile_flags()
 
@@ -929,6 +951,7 @@ class Service:
                 continue
             if now >= at:
                 for s in self.store.q("SELECT name FROM sites WHERE uid=?", (acc["uid"],)):
+                    self.drop_site_domains(acc["uid"], s["name"])
                     shutil.rmtree(os.path.join(self.cfg.sites_dir, acc["username"], s["name"]), ignore_errors=True)
                     self.store.run("DELETE FROM sites WHERE uid=? AND name=?", (acc["uid"], s["name"]))
                 self.refresh_usage(acc["uid"], acc["username"])
@@ -949,6 +972,194 @@ class Service:
             self.set_flag(name, True)
         for name in have - want:
             self.set_flag(name, False)
+        self.sync_domains()
+
+
+    # ---------- dominios propios (Cloudflare for SaaS) ----------
+    DOMAIN_LABEL = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
+
+    def clean_domain(self, raw):
+        d = (raw or "").strip().lower().rstrip(".")
+        if d.startswith(("http://", "https://")) or "/" in d or ":" in d or " " in d:
+            raise HttpError(400, "bad_domain", reason="escribe solo el dominio, por ejemplo midominio.com")
+        labels = d.split(".")
+        if len(d) > 253 or len(labels) < 2 or not all(self.DOMAIN_LABEL.match(l) for l in labels):
+            raise HttpError(400, "bad_domain", reason="dominio no válido")
+        tld = labels[-1]
+        if not (tld.isalpha() or tld.startswith("xn--")) or len(tld) < 2:
+            raise HttpError(400, "bad_domain", reason="dominio no válido")
+        base = self.cfg.base_domain
+        if d == base or d.endswith("." + base) or d == self.cfg.cname_target:
+            raise HttpError(400, "bad_domain", reason="los subdominios de budsin.dev ya están incluidos; usa un dominio propio")
+        stem = "-".join(labels[:-1])
+        flat = stem.lower().translate(moderation.LEET).replace("-", "")
+        if moderation.bad_name(stem, subdomain=False) or moderation.bad_text(stem.replace("-", " ")) or any(b in flat for b in moderation.BRANDS):
+            raise HttpError(400, "bad_domain", reason="nombre no permitido")
+        return d
+
+    def cf(self, method, path, body=None):
+        if not self.cfg.domains_ready():
+            raise HttpError(503, "domains_not_configured")
+        try:
+            status, data = http_json(f"{self.cfg.cf_api}/zones/{self.cfg.cf_zone}{path}", body,
+                                     {"Authorization": f"Bearer {self.cfg.cf_token}"}, method, timeout=20)
+        except (urllib.error.URLError, OSError, ValueError):
+            raise HttpError(502, "cloudflare_error")
+        if status >= 400 or not data.get("success", status < 300):
+            msg = " ".join(str(e.get("message", "")) for e in (data.get("errors") or []))[:200]
+            return status, {"error": msg or "error"}
+        return status, data.get("result") or {}
+
+    @staticmethod
+    def domain_state(result):
+        ssl = result.get("ssl") or {}
+        records, errors = [], []
+        ov = result.get("ownership_verification") or {}
+        if ov.get("name") and ov.get("value"):
+            records.append({"type": str(ov.get("type", "txt")).upper(), "name": ov["name"], "value": ov["value"], "purpose": "ownership"})
+        for r in ssl.get("validation_records") or []:
+            if r.get("txt_name") and r.get("txt_value"):
+                records.append({"type": "TXT", "name": r["txt_name"], "value": r["txt_value"], "purpose": "ssl"})
+        for e in (result.get("verification_errors") or []) + [x.get("message") for x in ssl.get("validation_errors") or [] if isinstance(x, dict)]:
+            if e:
+                errors.append(str(e)[:200])
+        if result.get("status") == "active" and ssl.get("status") == "active":
+            status = "active"
+        elif result.get("status") in ("blocked", "moved", "deleted"):
+            status = "error"
+        else:
+            status = "pending"
+        return status, {"records": records, "errors": errors[:3], "cf": result.get("status"), "ssl": ssl.get("status")}
+
+    def domain_limit(self, acc):
+        return PLANS[self.effective_plan(acc)]["domains"]
+
+    def domain_view(self, row):
+        info = json.loads(row["info"] or "{}")
+        return {"domain": row["domain"], "site": row["site"], "status": row["status"], "created": iso(row["created"]),
+                "cname": {"type": "CNAME", "name": row["domain"], "value": self.cfg.cname_target},
+                "records": info.get("records", []), "errors": info.get("errors", [])}
+
+    def list_domains(self, uid):
+        acc = self.need_account(uid)
+        rows = self.store.q("SELECT * FROM domains WHERE uid=? ORDER BY id", (uid,))
+        return {"domains": [self.domain_view(r) for r in rows], "limit": self.domain_limit(acc), "used": len(rows),
+                "available": self.cfg.domains_ready(), "cnameTarget": self.cfg.cname_target}
+
+    def add_domain(self, uid, domain, site):
+        acc = self.need_account(uid)
+        if acc["banned"]:
+            raise HttpError(403, "banned")
+        limit = self.domain_limit(acc)
+        if not limit:
+            raise HttpError(403, "plan_required")
+        if not self.cfg.domains_ready():
+            raise HttpError(503, "domains_not_configured")
+        d = self.clean_domain(domain)
+        site = (site or "").strip().lower()
+        if not self.store.one("SELECT 1 FROM sites WHERE uid=? AND name=?", (uid, site)):
+            raise HttpError(404, "no_site")
+        with self._domain_lock:
+            if self.store.one("SELECT 1 FROM domains WHERE domain=?", (d,)):
+                raise HttpError(409, "domain_taken")
+            if self.store.one("SELECT COUNT(*) c FROM domains WHERE uid=?", (uid,))["c"] >= limit:
+                raise HttpError(409, "too_many_domains", max=limit)
+            status, res = self.cf("POST", "/custom_hostnames", {
+                "hostname": d, "ssl": {"method": "http", "type": "dv", "settings": {"min_tls_version": "1.2"}}})
+            if status >= 400:
+                taken = any(w in res.get("error", "").lower() for w in ("already", "duplicate", "exists"))
+                raise HttpError(409 if taken else 502, "domain_taken" if taken else "cloudflare_error", reason=None if taken else res.get("error"))
+            state, info = self.domain_state(res)
+            now = int(time.time())
+            self.store.run("INSERT INTO domains (uid,site,domain,status,cf_id,info,created,checked) VALUES (?,?,?,?,?,?,?,?)",
+                           (uid, site, d, state, res.get("id"), json.dumps(info), now, now))
+        self.store.log(uid, "domain_add", f"{d} → {site}")
+        self.sync_domains()
+        return self.list_domains(uid)
+
+    def refresh_domain(self, row):
+        status, res = self.cf("GET", f"/custom_hostnames/{row['cf_id']}")
+        now = int(time.time())
+        if status == 404:
+            state, info = "error", {"records": [], "errors": ["not_found"]}
+        elif status >= 400:
+            self.store.run("UPDATE domains SET checked=? WHERE id=?", (now, row["id"]))
+            return
+        else:
+            state, info = self.domain_state(res)
+        self.store.run("UPDATE domains SET status=?, info=?, checked=? WHERE id=?", (state, json.dumps(info), now, row["id"]))
+        if state == "active" and row["status"] != "active":
+            self.store.log(row["uid"], "domain_active", row["domain"])
+
+    def check_domain(self, uid, domain):
+        row = self.store.one("SELECT * FROM domains WHERE uid=? AND domain=?", (uid, (domain or "").lower()))
+        if not row:
+            raise HttpError(404, "no_domain")
+        self.refresh_domain(row)
+        self.sync_domains()
+        return self.list_domains(uid)
+
+    def remove_domain(self, uid, domain, actor=None):
+        row = self.store.one("SELECT * FROM domains WHERE domain=? AND (uid=? OR ?)", ((domain or "").lower(), uid, 1 if actor else 0))
+        if not row:
+            raise HttpError(404, "no_domain")
+        if row["cf_id"] and self.cfg.domains_ready():
+            status, res = self.cf("DELETE", f"/custom_hostnames/{row['cf_id']}")
+            if status >= 400 and status != 404:
+                raise HttpError(502, "cloudflare_error", reason=res.get("error"))
+        self.store.run("DELETE FROM domains WHERE id=?", (row["id"],))
+        self.store.log(row["uid"], "domain_removed", row["domain"] + (f" por {actor}" if actor else ""))
+        self.sync_domains()
+        return self.list_domains(row["uid"]) if not actor else {"ok": True}
+
+    def drop_site_domains(self, uid, site):
+        for row in self.store.q("SELECT domain FROM domains WHERE uid=? AND site=?", (uid, site)):
+            with contextlib.suppress(HttpError):
+                self.remove_domain(uid, row["domain"])
+
+    def sync_domains(self):
+        """Enlaces y archivos-bandera de los dominios: solo los verificados, de cuentas encendidas, no vetadas y dentro del límite de su plan."""
+        want = {}
+        used = {}
+        for row in self.store.q("SELECT * FROM domains ORDER BY id"):
+            if row["status"] != "active":
+                continue
+            acc = self.account(row["uid"])
+            if not acc or not acc["powered"] or acc["banned"]:
+                continue
+            used[row["uid"]] = used.get(row["uid"], 0) + 1
+            if used[row["uid"]] > self.domain_limit(acc):
+                continue
+            want[row["domain"]] = os.path.join(self.cfg.sites_dir, acc["username"], row["site"])
+        for d, target in want.items():
+            link = os.path.join(self.cfg.domains_dir, d)
+            if not (os.path.islink(link) and os.readlink(link) == target):
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(link)
+                os.symlink(target, link)
+            flag = os.path.join(self.cfg.active_domains_dir, d)
+            if not os.path.exists(flag):
+                with open(flag, "w") as fh:
+                    fh.write("1")
+                os.chmod(flag, 0o644)
+        for folder in (self.cfg.domains_dir, self.cfg.active_domains_dir):
+            for name in os.listdir(folder):
+                if name not in want:
+                    with contextlib.suppress(OSError):
+                        os.remove(os.path.join(folder, name))
+
+    def poll_domains(self, now):
+        for row in self.store.q("SELECT * FROM domains WHERE status!='active' AND checked<=? ", (now - 60,)):
+            if now - row["created"] > DOMAIN_PENDING_DAYS * DAY:
+                with contextlib.suppress(HttpError):
+                    self.remove_domain(row["uid"], row["domain"])
+                    self.store.log(row["uid"], "domain_expired", row["domain"])
+                continue
+            with contextlib.suppress(HttpError):
+                self.refresh_domain(row)
+
+    def admin_domains(self):
+        return {"domains": [dict(self.domain_view(r), email=(self.account(r["uid"]) or {"email": ""})["email"]) for r in self.store.q("SELECT * FROM domains ORDER BY id DESC")]}
 
     # ---------- administración ----------
     def admin_accounts(self):
@@ -1196,13 +1407,13 @@ def plans_payload(svc):
     return {"plans": [
         {"id": pid, "name": PLANS[pid]["name"], "gb": PLANS[pid]["gb"], "hours": PLANS[pid]["hours"],
          "price": PLANS[pid]["price"], "sites": PLANS[pid]["sites"], "warnHours": PLANS[pid]["warn_hours"],
-         "fileMb": PLANS[pid]["file_mb"], "uploadMb": svc.upload_limit(pid) // (1024 * 1024), "badge": PLANS[pid]["badge"]}
+         "domains": PLANS[pid]["domains"], "fileMb": PLANS[pid]["file_mb"], "uploadMb": svc.upload_limit(pid) // (1024 * 1024), "badge": PLANS[pid]["badge"]}
         for pid in PLAN_ORDER],
         "paypal": {"clientId": svc.cfg.paypal_client, "plans": svc.cfg.paypal_plans, "ready": svc.cfg.paypal_ready(),
                    "sandbox": "sandbox" in svc.cfg.paypal_api},
         "maxUploadMb": round(svc.cfg.max_upload / 1024 / 1024),
         "purgeDays": PURGE_DAYS, "purgeWarnDays": PURGE_WARN_DAYS,
-        "baseDomain": svc.cfg.base_domain}
+        "baseDomain": svc.cfg.base_domain, "domainsReady": svc.cfg.domains_ready(), "cnameTarget": svc.cfg.cname_target}
 
 
 class CountingReader:
@@ -1352,6 +1563,17 @@ def make_handler(svc):
                 return svc.subscribe(uid, str(self.read_json().get("subscriptionId", "")))
             if method == "POST" and sub == "/cancel":
                 return svc.cancel_subscription(uid)
+            if sub == "/domains" and method == "GET":
+                return svc.list_domains(uid)
+            if sub == "/domains" and method == "POST":
+                body = self.read_json()
+                return svc.add_domain(uid, str(body.get("domain", "")), str(body.get("site", "")))
+            m = re.fullmatch(r"/domains/([a-z0-9.-]{1,253})(/check)?", sub)
+            if m:
+                if m.group(2) and method == "POST":
+                    return svc.check_domain(uid, m.group(1))
+                if not m.group(2) and method == "DELETE":
+                    return svc.remove_domain(uid, m.group(1))
             raise HttpError(404, "not_found")
 
         def admin(self, method, sub, query, actor):
@@ -1361,6 +1583,10 @@ def make_handler(svc):
                 return svc.admin_history(query.get("uid", ""))
             if method == "GET" and sub == "/strikes":
                 return svc.admin_strikes(query.get("uid", ""))
+            if method == "GET" and sub == "/domains":
+                return svc.admin_domains()
+            if method == "POST" and sub == "/domains/remove":
+                return svc.remove_domain("", str(self.read_json().get("domain", "")), actor)
             if method == "GET" and sub == "/reports":
                 return {"reports": [dict(r) for r in svc.store.q("SELECT * FROM reports ORDER BY id DESC LIMIT 200")]}
             m = re.fullmatch(r"/reports/(\d+)", sub)

@@ -10,7 +10,7 @@ envfile=/etc/budsin-hosting.env
 id budsin-hosting >/dev/null 2>&1 || useradd --system --home-dir /var/lib/budsin-hosting --shell /usr/sbin/nologin budsin-hosting
 install -d -o budsin-hosting -g budsin-hosting -m 0750 /var/lib/budsin-hosting
 install -d -m 0755 /var/www/hosting
-install -d -o budsin-hosting -g budsin-hosting -m 0755 /var/www/hosting/sites /var/www/hosting/active
+install -d -o budsin-hosting -g budsin-hosting -m 0755 /var/www/hosting/sites /var/www/hosting/active /var/www/hosting/domains /var/www/hosting/active-domains
 install -m 0644 "$here/off.html" /var/www/hosting/off.html
 install -d -m 0755 /opt/budsin-hosting
 install -m 0644 "$here/budsin_hosting.py" "$here/moderation.py" /opt/budsin-hosting/
@@ -24,11 +24,13 @@ cat > /usr/local/sbin/budsin-hosting-set <<'SH'
 #!/usr/bin/env bash
 # Guarda un valor en /etc/budsin-hosting.env y reinicia el servicio. El Secret se pide sin mostrarse.
 #   budsin-hosting-set PAYPAL_SECRET        (silencioso)
+#   budsin-hosting-set CF_API_TOKEN         (silencioso)
+#   budsin-hosting-set CF_ZONE_ID           (visible)
 #   budsin-hosting-set PAYPAL_PLAN_PLUS     (visible)
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Ejecuta con sudo"; exit 1; }
 key=${1:-}; [[ "$key" =~ ^[A-Z_]+$ ]] || { echo "Uso: budsin-hosting-set CLAVE"; exit 1; }
-if [ "$key" = PAYPAL_SECRET ]; then read -rsp "$key: " val; echo; else read -rp "$key: " val; fi
+if [ "$key" = PAYPAL_SECRET ] || [ "$key" = CF_API_TOKEN ]; then read -rsp "$key: " val; echo; else read -rp "$key: " val; fi
 [ -n "$val" ] || { echo "Vacío, no se cambia nada"; exit 1; }
 python3 - "$key" "$val" <<'PY'
 import re, sys
@@ -96,6 +98,23 @@ PY
   fi
 fi
 
+# Caddy: bloque comodín para dominios propios (cualquier host sin bloque propio).
+if grep -q "active-domains" "$caddyfile"; then
+  echo "Caddy ya tiene el bloque de dominios propios"
+else
+  backup="$caddyfile.bak.$(date +%Y%m%d%H%M%S)"
+  cp -a "$caddyfile" "$backup"
+  touch /var/log/caddy/hosting-domains-access.log && chown caddy:caddy /var/log/caddy/hosting-domains-access.log && chmod 600 /var/log/caddy/hosting-domains-access.log
+  cat "$here/caddy-custom.txt" >> "$caddyfile"
+  if caddy validate --config "$caddyfile" --adapter caddyfile >/dev/null 2>&1; then
+    systemctl reload caddy
+    echo "Caddy: añadido el bloque de dominios propios (copia: $backup)"
+  else
+    cp -a "$backup" "$caddyfile"
+    echo "Caddyfile no valida con el bloque de dominios propios; restaurado. El resto sigue igual."
+  fi
+fi
+
 echo "--- comprobación local"
 # El servicio tarda unos segundos en escuchar (al arrancar revisa las cuentas): se reintenta hasta 30 s.
 for _ in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:3102/api/hosting/health && break; sleep 1; done
@@ -103,5 +122,6 @@ curl -s http://127.0.0.1:3102/api/hosting/health; echo
 curl -s -o /dev/null -w "budsin.dev /about (URL limpia) %{http_code}\n" -H "Host: budsin.dev" http://127.0.0.1:8080/about
 curl -s -o /dev/null -w "budsin.dev /api/hosting/plans %{http_code}\n" -H "Host: budsin.dev" http://127.0.0.1:8080/api/hosting/plans
 curl -s -o /dev/null -w "sitio inexistente (debe ser 503) %{http_code}\n" -H "Host: nadie.budsin.dev" http://127.0.0.1:8080/
+curl -s -o /dev/null -w "dominio propio inexistente (debe ser 503) %{http_code}\n" -H "Host: no-existe.example.org" http://127.0.0.1:8080/
 for h in games.budsin.dev budsin.dev thiagift.budsin.dev; do curl -s -o /dev/null -w "$h %{http_code}\n" -H "Host: $h" http://127.0.0.1:8080/; done
 systemctl is-active caddy budsin-hosting

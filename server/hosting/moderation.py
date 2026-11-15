@@ -6,6 +6,7 @@ RESERVED = {
     "root", "support", "soporte", "help", "ayuda", "status", "blog", "hosting", "app", "cdn", "static", "assets",
     "login", "signin", "signup", "pay", "payment", "pagos", "billing", "dashboard", "panel", "docs", "dev",
     "test", "staging", "demo", "web", "webmail", "vpn", "git", "dns", "proxy", "server", "servidor", "cloud",
+    "custom", "domains", "dominios",
 }
 # Marcas y entidades que se suelen suplantar: no pueden aparecer dentro de un nombre.
 BRANDS = (

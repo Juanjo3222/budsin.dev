@@ -1,0 +1,31 @@
+
+# Budsin Hosting: dominios propios (Cloudflare for SaaS). Cualquier host que no tenga bloque propio llega aquí.
+# Un dominio solo se sirve si existe su archivo-bandera: el servicio lo crea cuando Cloudflare lo valida y la cuenta está encendida.
+http://:8080 {
+	bind 127.0.0.1
+	@on file {
+		root /var/www/hosting/active-domains
+		try_files {http.request.host}
+	}
+	handle @on {
+		root * /var/www/hosting/domains/{http.request.host}
+		encode gzip zstd
+		header {
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "strict-origin-when-cross-origin"
+		}
+		file_server
+	}
+	handle {
+		root * /var/www/hosting
+		rewrite * /off.html
+		header Cache-Control "no-store"
+		file_server {
+			status 503
+		}
+	}
+	log {
+		output file /var/log/caddy/hosting-domains-access.log
+		format json
+	}
+}

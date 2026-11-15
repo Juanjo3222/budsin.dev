@@ -26,6 +26,7 @@ TOKENS = {
 }
 SUBS = {}
 CALLS = {"cancel": 0}
+CF_HOSTS = {}   # id -> resultado de Cloudflare (Custom Hostnames simulado)
 VERIFY = {"verification_status": "SUCCESS"}
 
 
@@ -45,8 +46,30 @@ class Fake(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def cf(self, ok, result=None, msg="", code=200):
+        self.send(code, {"success": ok, "result": result, "errors": [] if ok else [{"message": msg}]})
+
+    def do_DELETE(self):
+        if self.path.startswith("/zones/Z1/custom_hostnames/"):
+            hid = self.path.rsplit("/", 1)[1]
+            return self.cf(True, {"id": hid}) if CF_HOSTS.pop(hid, None) else self.cf(False, msg="not found", code=404)
+        self.send(404)
+
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if self.path == "/zones/Z1/custom_hostnames":
+            if self.headers.get("Authorization") != "Bearer cf-token":
+                return self.cf(False, msg="bad token", code=403)
+            host = json.loads(body)["hostname"]
+            if any(h["hostname"] == host for h in CF_HOSTS.values()):
+                return self.cf(False, msg="Duplicate custom hostname found.", code=400)
+            hid = "h%d" % (len(CF_HOSTS) + 1 + sum(1 for _ in range(0)))
+            while hid in CF_HOSTS:
+                hid += "x"
+            CF_HOSTS[hid] = {"id": hid, "hostname": host, "status": "pending",
+                             "ssl": {"status": "pending_validation", "validation_records": [{"txt_name": "_acme-challenge." + host, "txt_value": "tok"}]},
+                             "ownership_verification": {"type": "txt", "name": "_cf-custom-hostname." + host, "value": "uuid-1"}}
+            return self.cf(True, CF_HOSTS[hid])
         if self.path.startswith("/v1/oauth2/token"):
             return self.send(200, {"access_token": "pp", "expires_in": 3600})
         if self.path.startswith("/lookup"):
@@ -69,6 +92,9 @@ class Fake(BaseHTTPRequestHandler):
         self.send(404)
 
     def do_GET(self):
+        if self.path.startswith("/zones/Z1/custom_hostnames/"):
+            h = CF_HOSTS.get(self.path.rsplit("/", 1)[1])
+            return self.cf(True, h) if h else self.cf(False, msg="not found", code=404)
         if self.path.startswith("/v1/billing/subscriptions/"):
             sub = SUBS.get(self.path.rsplit("/", 1)[1])
             return self.send(200, sub) if sub else self.send(404)
@@ -122,6 +148,8 @@ class HostingTest(unittest.TestCase):
             "DATA_DIR": cls.tmp + "/data", "SITES_DIR": cls.tmp + "/sites", "ACTIVE_DIR": cls.tmp + "/active",
             "FIREBASE_API_KEY": "key", "FIREBASE_LOOKUP_URL": fp + "/lookup", "ADMIN_EMAILS": "admin@x.com",
             "PAYPAL_API_BASE": fp, "PAYPAL_CLIENT_ID": "cid", "PAYPAL_SECRET": "sec", "PAYPAL_WEBHOOK_ID": "WH",
+            "CF_API_BASE": fp, "CF_API_TOKEN": "cf-token", "CF_ZONE_ID": "Z1", "CUSTOM_CNAME_TARGET": "custom.budsin.dev",
+            "DOMAINS_DIR": cls.tmp + "/domains", "ACTIVE_DOMAINS_DIR": cls.tmp + "/active-domains",
             "PAYPAL_PLAN_PLUS": "P-PLUS", "PAYPAL_PLAN_PRO": "P-PRO", "PAYPAL_PLAN_ULTRA": "P-ULTRA", "MAX_UPLOAD_MB": "5", "UPLOAD_RATE": "1000", "RATE_LIMIT": "100000",
         })
         cls.svc = bh.Service(bh.Config())
@@ -685,6 +713,89 @@ class HostingTest(unittest.TestCase):
         acc = next(a for a in adm("/admin/accounts", m="GET")[1]["accounts"] if a["uid"] == "uid-carla")
         self.assertEqual((acc["banned"], acc["banKind"], acc["strikes"]), (True, "perm", 2))
         adm("/admin/account/uid-carla/ban", {"kind": "none"})
+
+
+    def test_z2_dominios_propios(self):
+        self.reg("tok-beto", "beto-web")
+        beto = lambda m, path, body=None: call(self.base, m, path, "tok-beto", body)
+        # Free: no se puede
+        self.svc.store.run("UPDATE accounts SET plan='free', plan_until=0 WHERE uid='uid-beto'")
+        self.assertEqual(beto("GET", "/domains")[1]["limit"], 0)
+        self.assertEqual(beto("POST", "/domains", {"domain": "mio.com", "site": "x"})[1]["error"], "plan_required")
+        # plan Plus: 1 dominio
+        self.svc.store.run("UPDATE accounts SET plan='plus', plan_until=? WHERE uid='uid-beto'", (int(time.time()) + 86400 * 30,))
+        self.assertEqual(self.put("tok-beto", "tienda", "index.html", "<p>hola</p>")[0], 200)
+        for malo in ("http://mio.com", "mio.com/ruta", "mio", "-mio.com", "mi o.com", "mio..com", "a.b.budsin.dev", "budsin.dev",
+                     "custom.budsin.dev", "1.2.3.4", "porn-site.com", "paypal-login.com", "mibanco.net", "x" * 64 + ".com", "mio.c0m", "mio:80.com"):
+            self.assertEqual(beto("POST", "/domains", {"domain": malo, "site": "tienda"})[1].get("error"), "bad_domain", malo)
+        self.assertEqual(beto("POST", "/domains", {"domain": "mio.com", "site": "no-existe"})[1]["error"], "no_site")
+        code, r = beto("POST", "/domains", {"domain": "  MiTienda.COM. ", "site": "tienda"})
+        self.assertEqual(code, 200, r)
+        d = r["domains"][0]
+        self.assertEqual((d["domain"], d["site"], d["status"]), ("mitienda.com", "tienda", "pending"))
+        self.assertEqual(d["cname"], {"type": "CNAME", "name": "mitienda.com", "value": "custom.budsin.dev"})
+        self.assertTrue(any(x["purpose"] == "ownership" for x in d["records"]))
+        self.assertEqual((r["limit"], r["used"], r["available"]), (1, 1, True))
+        # límites, duplicados y ajeno
+        self.assertEqual(beto("POST", "/domains", {"domain": "otro.com", "site": "tienda"})[1]["error"], "too_many_domains")
+        self.assertEqual(call(self.base, "POST", "/domains", "tok-carla", {"domain": "mitienda.com", "site": "x"})[1]["error"], "plan_required")
+        self.svc.store.run("UPDATE accounts SET plan='pro', plan_until=? WHERE uid='uid-carla'", (int(time.time()) + 86400,))
+        self.assertEqual(self.put("tok-carla", "web-c", "index.html", "<p>c</p>")[0], 200)
+        self.assertEqual(call(self.base, "POST", "/domains", "tok-carla", {"domain": "mitienda.com", "site": "web-c"})[1]["error"], "domain_taken")
+        self.assertEqual(call(self.base, "DELETE", "/domains/mitienda.com", "tok-carla")[1]["error"], "no_domain")   # no es suyo
+        # pendiente: sin enlace ni bandera aunque la cuenta esté encendida
+        beto("POST", "/power", {"on": True})
+        self.assertEqual(os.listdir(self.tmp + "/active-domains"), [])
+        self.assertEqual(beto("POST", "/domains/mitienda.com/check")[1]["domains"][0]["status"], "pending")
+        # Cloudflare lo da por válido
+        for h in CF_HOSTS.values():
+            h["status"], h["ssl"] = "active", {"status": "active"}
+        r = beto("POST", "/domains/mitienda.com/check")[1]
+        self.assertEqual(r["domains"][0]["status"], "active")
+        link = self.tmp + "/domains/mitienda.com"
+        self.assertEqual(os.readlink(link), self.tmp + "/sites/beto-web/tienda")
+        self.assertTrue(os.path.exists(self.tmp + "/active-domains/mitienda.com"))
+        # apagar, vetar o perder el plan quita la bandera
+        beto("POST", "/power", {"on": False})
+        self.assertFalse(os.path.exists(self.tmp + "/active-domains/mitienda.com"))
+        beto("POST", "/power", {"on": True})
+        self.assertTrue(os.path.exists(self.tmp + "/active-domains/mitienda.com"))
+        call(self.base, "POST", "/admin/account/uid-beto/ban", "tok-admin", {"kind": "soft"})
+        self.assertFalse(os.path.exists(self.tmp + "/active-domains/mitienda.com"))
+        call(self.base, "POST", "/admin/account/uid-beto/ban", "tok-admin", {"kind": "none"})
+        beto("POST", "/power", {"on": True})
+        self.assertTrue(os.path.exists(self.tmp + "/active-domains/mitienda.com"))
+        self.svc.store.run("UPDATE accounts SET plan='free', plan_until=0 WHERE uid='uid-beto'")
+        self.svc.tick()
+        self.assertFalse(os.path.exists(self.tmp + "/active-domains/mitienda.com"))
+        self.assertFalse(os.path.lexists(link))
+        self.svc.store.run("UPDATE accounts SET plan='plus', plan_until=? WHERE uid='uid-beto'", (int(time.time()) + 86400 * 30,))
+        self.svc.tick()
+        self.assertTrue(os.path.exists(self.tmp + "/active-domains/mitienda.com"))     # al volver el plan, vuelve el dominio
+        # borrar el sitio borra el dominio (y su registro en Cloudflare)
+        self.assertEqual(beto("DELETE", "/sites/tienda")[0], 200)
+        self.assertEqual(beto("GET", "/domains")[1]["domains"], [])
+        self.assertEqual(CF_HOSTS, {})
+        self.assertFalse(os.path.lexists(link))
+        # quitar a mano
+        self.assertEqual(self.put("tok-beto", "tienda2", "index.html", "<p>2</p>")[0], 200)
+        beto("POST", "/domains", {"domain": "dos.com", "site": "tienda2"})
+        self.assertEqual(len(CF_HOSTS), 1)
+        self.assertEqual(call(self.base, "GET", "/admin/domains", "tok-admin")[1]["domains"][0]["domain"], "dos.com")
+        self.assertEqual(beto("DELETE", "/domains/dos.com")[1]["domains"], [])
+        self.assertEqual(CF_HOSTS, {})
+        # pendiente caduca a los 7 días y libera el nombre
+        beto("POST", "/domains", {"domain": "viejo.com", "site": "tienda2"})
+        self.svc.store.run("UPDATE domains SET created=?, checked=0", (int(time.time()) - 8 * 86400,))
+        self.svc.tick()
+        self.assertEqual(beto("GET", "/domains")[1]["domains"], [])
+        self.assertEqual(CF_HOSTS, {})
+        # sin configurar Cloudflare
+        saved = self.svc.cfg.cf_token
+        self.svc.cfg.cf_token = ""
+        self.assertEqual(beto("POST", "/domains", {"domain": "tres.com", "site": "tienda2"})[1]["error"], "domains_not_configured")
+        self.svc.cfg.cf_token = saved
+        self.assertEqual(beto("DELETE", "/sites/tienda2")[0], 200)
 
     def test_r_cors_y_planes(self):
         code, body = call(self.base, "GET", "/plans")
