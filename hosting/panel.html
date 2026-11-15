@@ -87,6 +87,7 @@ function render() {
   const st = me.storage;
   const banners = [];
   if (me.banned) banners.push(alertBox("err", "Tu cuenta está suspendida. Escribe a budsinjys@gmail.com si crees que es un error."));
+  if (me.purgeWarning) banners.push(alertBox("warn", "Tu sitio lleva mucho tiempo apagado: sus archivos se borrarán el " + when(me.purgeAt) + " si no lo enciendes antes (plan Free). Enciéndelo una vez y el contador se reinicia."));
   if (me.warning) banners.push(alertBox("warn", "Tu servidor se apagará pronto (" + when(me.offAt) + "). Tus archivos no se borran: podrás volver a encenderlo."));
   if (st.full) banners.push(alertBox("err", "Almacenamiento al 100 %: no puedes subir más archivos. Borra algún sitio o mejora tu plan."));
   else if (st.warn80) banners.push(alertBox("warn", "Has usado el " + st.percent + " % de tu almacenamiento."));
@@ -121,7 +122,7 @@ function render() {
         <span><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a><br><span class="h-muted">${bytes(s.bytes)} · ${s.files} archivos · ${esc(when(s.updated))}</span></span>
         <button class="btn btn-danger h-btn-sm" data-del="${esc(s.name)}">Borrar</button></li>`).join("") : '<li class="h-muted">Todavía no tienes sitios.</li>'}</ul>
       <h2 style="margin-top:20px">Subir o reemplazar un sitio</h2>
-      <p class="h-muted" style="margin-bottom:10px">Sube un .zip con tu sitio (con <em>index.html</em> en la raíz). Si el nombre ya existe, se reemplaza su contenido. Máximo ${plans ? plans.maxUploadMb : 95} MB por subida.</p>
+      <p class="h-muted" style="margin-bottom:10px">Sube un .zip con tu sitio (con <em>index.html</em> en la raíz). Si el nombre ya existe, se reemplaza su contenido. Máximo ${me.uploadMb} MB por subida${me.fileMb ? " y " + me.fileMb + " MB por archivo" : ""}.${me.badge ? " Los sitios del plan Free muestran una pequeña insignia «Hecho con Budsin Hosting»." : ""}</p>
       <div class="h-row" style="justify-content:flex-start">
         <input id="site" class="h-input" placeholder="nombre-del-sitio" maxlength="39" style="width:200px">
         <input id="zip" type="file" accept=".zip,application/zip" class="h-input">

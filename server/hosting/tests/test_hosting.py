@@ -20,6 +20,7 @@ TOKENS = {
     "tok-beto": ("uid-beto", "beto@x.com", True),
     "tok-admin": ("uid-admin", "admin@x.com", True),
     "tok-sinverificar": ("uid-sv", "admin@x.com", False),
+    "tok-carla": ("uid-carla", "carla@x.com", True),
 }
 SUBS = {}
 CALLS = {"cancel": 0}
@@ -156,7 +157,7 @@ class HostingTest(unittest.TestCase):
         code, me = call(self.base, "POST", "/power", "tok-beto", {"on": True})
         self.assertEqual((code, me["state"]), (200, "on"))
         self.assertTrue(os.path.exists(self.svc.flag_path("beto-web")))
-        self.assertAlmostEqual(me["secondsLeft"], 24 * 3600, delta=5)
+        self.assertAlmostEqual(me["secondsLeft"], 12 * 3600, delta=5)
         self.assertEqual(call(self.base, "POST", "/power", "tok-beto", {"on": True})[1]["error"], "already_on")
         me = call(self.base, "POST", "/power", "tok-beto", {"on": False})[1]
         self.assertEqual(me["state"], "off")
@@ -165,7 +166,7 @@ class HostingTest(unittest.TestCase):
         for _ in range(2):
             code, me = call(self.base, "POST", "/power", "tok-beto", {"on": True})
             self.assertEqual((code, me["state"]), (200, "on"))
-            self.assertAlmostEqual(me["secondsLeft"], 24 * 3600, delta=5)
+            self.assertAlmostEqual(me["secondsLeft"], 12 * 3600, delta=5)
             self.assertEqual(call(self.base, "POST", "/power", "tok-beto", {"on": False})[1]["state"], "off")
         events = [h["event"] for h in call(self.base, "GET", "/me", "tok-beto")[1]["history"]]
         self.assertEqual(events[:3], ["power_off", "power_on", "power_off"])
@@ -177,7 +178,7 @@ class HostingTest(unittest.TestCase):
         if not acc["powered"]:
             self.svc.power_on(uid)
         now = int(time.time())
-        self.svc.store.run("UPDATE accounts SET off_at=?, warned=0 WHERE uid=?", (now + 6 * 3600, uid))  # quedan 6 h (<12 h)
+        self.svc.store.run("UPDATE accounts SET off_at=?, warned=0 WHERE uid=?", (now + 2 * 3600, uid))  # quedan 2 h (<3 h)
         self.svc.tick()
         me = call(self.base, "GET", "/me", "tok-ana")[1]
         self.assertTrue(me["warning"])
@@ -211,7 +212,8 @@ class HostingTest(unittest.TestCase):
         # zip con una carpeta raíz única: se aplana
         code, me = self.up("tok-admin", "blog", {"mi-sitio/index.html": "<p>v2</p>"})
         self.assertEqual(code, 200)
-        self.assertEqual(rd(self.tmp + "/sites/admin-web/blog/index.html"), "<p>v2</p>")
+        html = rd(self.tmp + "/sites/admin-web/blog/index.html")
+        self.assertTrue(html.startswith("<p>v2</p>") and html.count(bh.BADGE_START) == 1)  # Free: insignia, una sola vez
         self.assertFalse(os.path.exists(self.tmp + "/sites/admin-web/blog/css"))  # la subida reemplaza el sitio
         self.assertIn("blog", rd(self.tmp + "/sites/admin-web/index.html"))
 
@@ -250,14 +252,17 @@ class HostingTest(unittest.TestCase):
         self.assertTrue(call(self.base, "GET", "/me", "tok-sinverificar")[1]["storage"]["full"])
 
     def test_i_limite_de_sitios_y_borrado(self):
-        for i in range(2, 4):  # Free: máximo 3 sitios (ya existe "blog"; las pruebas f/g dejaron solo 1)
-            self.assertEqual(self.up("tok-admin", f"s{i}", {"index.html": "ok"})[0], 200)
-        code, body = self.up("tok-admin", "s4", {"index.html": "ok"})
+        code, body = self.up("tok-admin", "s2", {"index.html": "ok"})  # Free: 1 solo sitio (ya existe "blog")
         self.assertEqual((code, body["error"]), (409, "too_many_sites"))
+        self.assertEqual(self.up("tok-admin", "blog", {"index.html": "reemplazo"})[0], 200)  # reemplazar el existente sí
+        self.svc.store.run("UPDATE accounts SET plan='plus', plan_until=? WHERE uid='uid-admin'", (int(time.time()) + 86400,))
+        for name in ("s2", "s3"):
+            self.assertEqual(self.up("tok-admin", name, {"index.html": "ok"})[0], 200)
         code, me = call(self.base, "DELETE", "/sites/s2", "tok-admin")
         self.assertEqual(code, 200)
         self.assertFalse(os.path.exists(self.tmp + "/sites/admin-web/s2"))
         self.assertEqual(call(self.base, "DELETE", "/sites/s2", "tok-admin")[1]["error"], "no_site")
+        self.svc.store.run("UPDATE accounts SET plan='free', plan_until=0 WHERE uid='uid-admin'")
 
     # --- administración ---
     def test_j_admin(self):
@@ -364,6 +369,83 @@ class HostingTest(unittest.TestCase):
         finally:
             sys.stderr = orig
         self.assertEqual(errors, [])
+
+    # --- límites y marca del plan Free ---
+    def test_t_limites_de_archivo_free(self):
+        self.reg("tok-carla", "carla-web")
+        big = make_zip({"index.html": "x", "grande.mp4": b"\0" * (16 * 1024 * 1024)})  # comprime muy bien: el zip es pequeño
+        code, body = self.up("tok-carla", "video", big)
+        self.assertEqual((code, body["error"]), (413, "file_too_large"))
+        self.assertEqual(body["max"], 15 * 1024 * 1024)
+        self.assertEqual(self.svc.file_limit("free"), 15 * 1024 * 1024)
+        self.assertGreater(self.svc.file_limit("plus"), 100 * 1024 * 1024)
+        self.assertEqual(self.svc.upload_limit("free"), min(self.svc.cfg.max_upload, 40 * 1024 * 1024))
+        self.assertFalse(os.path.exists(self.tmp + "/sites/carla-web/video"))
+
+    def test_u_insignia_free_se_quita_y_se_pone_con_el_plan(self):
+        page = self.tmp + "/sites/carla-web/web/index.html"
+        self.assertEqual(self.up("tok-carla", "web", {"index.html": "<html><body><h1>Hola</h1></body></html>", "sub/a.html": "<p>a</p>"})[0], 200)
+        html = rd(page)
+        self.assertEqual(html.count(bh.BADGE_START), 1)
+        self.assertLess(html.index(bh.BADGE_START), html.index("</body>"))  # dentro del body
+        self.assertIn(bh.BADGE_START, rd(self.tmp + "/sites/carla-web/web/sub/a.html"))  # también sin <body>
+        used_free = call(self.base, "GET", "/me", "tok-carla")[1]["storage"]["used"]
+        self.assertEqual(call(self.base, "POST", "/admin/account/uid-carla/plan", "tok-admin", {"plan": "plus", "days": 30})[0], 200)
+        self.assertEqual(rd(page), "<html><body><h1>Hola</h1></body></html>")  # al pagar, desaparece sin volver a subir
+        self.assertLess(call(self.base, "GET", "/me", "tok-carla")[1]["storage"]["used"], used_free)
+        self.assertEqual(self.up("tok-carla", "web", {"index.html": "<body>v2</body>"})[0], 200)
+        self.assertNotIn(bh.BADGE_START, rd(page))  # plan de pago: sin insignia al subir
+        self.svc.store.run("UPDATE accounts SET plan_until=? WHERE uid='uid-carla'", (int(time.time()) - 5,))
+        self.svc.tick()  # caduca el plan: vuelve a Free y a llevar insignia
+        self.assertEqual(rd(page).count(bh.BADGE_START), 1)
+        self.svc.apply_branding("uid-carla")  # idempotente
+        self.assertEqual(rd(page).count(bh.BADGE_START), 1)
+
+    def test_v_borrado_de_sitios_free_abandonados(self):
+        uid = "uid-carla"
+        self.svc.store.run("UPDATE accounts SET plan='free', plan_until=0, powered=0 WHERE uid=?", (uid,))
+        now = int(time.time())
+        d = 86400
+        self.svc.store.run("UPDATE accounts SET off_since=?, purge_warned=0 WHERE uid=?", (now - 30 * d, uid))
+        self.svc.tick()
+        me = call(self.base, "GET", "/me", "tok-carla")[1]
+        self.assertFalse(me["purgeWarning"])
+        self.assertTrue(me["purgeAt"])
+        self.svc.store.run("UPDATE accounts SET off_since=? WHERE uid=?", (now - 61 * d, uid))  # día 61: aviso
+        self.svc.tick()
+        me = call(self.base, "GET", "/me", "tok-carla")[1]
+        self.assertTrue(me["purgeWarning"])
+        self.assertIn("purge_warning", [h["event"] for h in me["history"]])
+        self.assertTrue(os.path.exists(self.tmp + "/sites/carla-web/web"))
+        # una cuenta encendida no se toca
+        self.svc.store.run("UPDATE accounts SET off_since=? WHERE uid=?", (now - 120 * d, uid))
+        self.svc.store.run("UPDATE accounts SET powered=1, off_at=? WHERE uid=?", (now + 3600, uid))
+        self.svc.tick()
+        self.assertTrue(os.path.exists(self.tmp + "/sites/carla-web/web"))
+        self.svc.store.run("UPDATE accounts SET powered=0, off_at=0 WHERE uid=?", (uid,))
+        # un plan de pago vigente tampoco se purga
+        self.svc.store.run("UPDATE accounts SET plan='plus', plan_until=? WHERE uid=?", (now + 5 * d, uid))
+        self.svc.tick()
+        self.assertTrue(os.path.exists(self.tmp + "/sites/carla-web/web"))
+        # Free y más de 90 días apagado: se borran los sitios (la cuenta se queda)
+        self.svc.store.run("UPDATE accounts SET plan='free', plan_until=? WHERE uid=?", (0, uid))
+        self.svc.store.run("UPDATE accounts SET off_since=? WHERE uid=?", (now - 91 * d, uid))
+        self.svc.tick()
+        me = call(self.base, "GET", "/me", "tok-carla")[1]
+        self.assertEqual(me["sites"], [])
+        self.assertFalse(os.path.exists(self.tmp + "/sites/carla-web/web"))
+        self.assertEqual(me["storage"]["used"], 0)
+        self.assertIn("sites_purged", [h["event"] for h in me["history"]])
+        self.assertEqual(me["username"], "carla-web")
+        self.assertIsNone(me["purgeAt"])  # ya no hay sitios que borrar
+
+    def test_w_valores_de_los_planes(self):
+        body = call(self.base, "GET", "/plans")[1]
+        free = body["plans"][0]
+        self.assertEqual((free["hours"], free["sites"], free["fileMb"], free["badge"], free["warnHours"]), (12, 1, 15, True, 3))
+        self.assertEqual(body["purgeDays"], 90)
+        self.assertEqual(body["purgeWarnDays"], 60)
+        self.assertTrue(all(not p["badge"] for p in body["plans"][1:]))
 
     def test_r_cors_y_planes(self):
         code, body = call(self.base, "GET", "/plans")

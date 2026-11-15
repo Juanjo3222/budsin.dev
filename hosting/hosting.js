@@ -70,7 +70,7 @@ const ERRORS = {
   username_taken: "Ese nombre ya está en uso.", already_registered: "Ya tienes una cuenta.",
   bad_username: "Nombre no válido.", already_on: "El servidor ya está encendido.", banned: "Esta cuenta está suspendida.",
   storage_full: "Alcanzaste el límite de almacenamiento de tu plan.",
-  too_many_sites: "Alcanzaste el máximo de sitios de tu plan.", upload_too_large: "El .zip supera el tamaño máximo por subida.",
+  too_many_sites: "Alcanzaste el máximo de sitios de tu plan.", file_too_large: "Un archivo del .zip supera el tamaño máximo de tu plan.", upload_too_large: "El .zip supera el tamaño máximo por subida.",
   bad_zip: "El archivo no es un .zip válido.", empty_zip: "El .zip está vacío.", unsafe_path: "El .zip contiene rutas no permitidas.",
   file_type_not_allowed: "El .zip contiene un tipo de archivo no permitido.", missing_index: "El .zip debe incluir un index.html.",
   content_blocked: "El contenido no cumple las normas de uso.", bad_site_name: "Nombre de sitio no válido.",
@@ -84,7 +84,7 @@ export function explain(err) {
   if (d.file) msg += " Archivo: " + d.file + (d.ext ? " (" + d.ext + ")" : "") + ".";
   if (d.reason) msg += " " + d.reason + ".";
   if (d.next_available) msg += " Disponible desde el " + when(d.next_available) + ".";
-  if (d.max && err.code === "upload_too_large") msg += " Máximo: " + bytes(d.max) + ".";
+  if (d.max && (err.code === "upload_too_large" || err.code === "file_too_large")) msg += " Máximo: " + bytes(d.max) + ".";
   if (d.max && err.code === "too_many_sites") msg += " Máximo: " + d.max + ".";
   return msg;
 }

@@ -43,12 +43,29 @@ MAX_FILES = 5000
 MAX_FILE_BYTES = 200 * 1024 * 1024
 SCAN_BYTES = 2 * 1024 * 1024
 
+# file_mb / upload_mb: tope por archivo y por subida (None = el máximo del servidor). badge: insignia en los .html.
 PLANS = {
-    "free":  {"name": "Free",  "gb": 1,  "hours": 24,      "warn_hours": 12, "price": 0.00, "sites": 3},
-    "plus":  {"name": "Plus",  "gb": 5,  "hours": 5 * 24,  "warn_hours": 24, "price": 1.99, "sites": 10},
-    "pro":   {"name": "Pro",   "gb": 10, "hours": 14 * 24, "warn_hours": 24, "price": 3.99, "sites": 25},
-    "ultra": {"name": "Ultra", "gb": 15, "hours": None,    "warn_hours": 0,  "price": 6.99, "sites": 50},
+    "free":  {"name": "Free",  "gb": 1,  "hours": 12,      "warn_hours": 3,  "price": 0.00, "sites": 1,
+              "file_mb": 15, "upload_mb": 40, "badge": True},
+    "plus":  {"name": "Plus",  "gb": 5,  "hours": 5 * 24,  "warn_hours": 24, "price": 1.99, "sites": 10,
+              "file_mb": None, "upload_mb": None, "badge": False},
+    "pro":   {"name": "Pro",   "gb": 10, "hours": 14 * 24, "warn_hours": 24, "price": 3.99, "sites": 25,
+              "file_mb": None, "upload_mb": None, "badge": False},
+    "ultra": {"name": "Ultra", "gb": 15, "hours": None,    "warn_hours": 0,  "price": 6.99, "sites": 50,
+              "file_mb": None, "upload_mb": None, "badge": False},
 }
+PURGE_DAYS = 90        # los sitios del plan Free que llevan tanto tiempo apagados se borran
+PURGE_WARN_DAYS = 60   # desde aquí se avisa en el panel y el historial
+BADGE_START, BADGE_END = "<!--budsin-badge-->", "<!--/budsin-badge-->"
+BADGE_HTML = (
+    BADGE_START
+    + '<a href="https://budsin.dev/hosting/" target="_blank" rel="noopener" style="position:fixed;right:10px;bottom:10px;'
+    'z-index:2147483647;font:600 11px/1 system-ui,sans-serif;color:#fff;background:rgba(10,10,11,.78);padding:7px 10px;'
+    'border-radius:99px;text-decoration:none;letter-spacing:.02em">Hecho con Budsin Hosting</a>'
+    + BADGE_END
+)
+BADGE_RE = re.compile(re.escape(BADGE_START).encode() + rb".*?" + re.escape(BADGE_END).encode(), re.S)
+BODY_CLOSE_RE = re.compile(rb"</body\s*>(?!.*</body\s*>)", re.I | re.S)
 PLAN_ORDER = ["free", "plus", "pro", "ultra"]
 
 USERNAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,28})[a-z0-9]$")
@@ -156,7 +173,8 @@ class Store:
                     powered INTEGER NOT NULL DEFAULT 0, powered_since INTEGER NOT NULL DEFAULT 0,
                     off_at INTEGER NOT NULL DEFAULT 0, last_free_on INTEGER NOT NULL DEFAULT 0,
                     warned INTEGER NOT NULL DEFAULT 0, banned INTEGER NOT NULL DEFAULT 0,
-                    used_bytes INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
+                    used_bytes INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL,
+                    off_since INTEGER NOT NULL DEFAULT 0, purge_warned INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS sites (
                     uid TEXT NOT NULL, name TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0,
                     files INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL, PRIMARY KEY (uid, name));
@@ -174,6 +192,12 @@ class Store:
                     contact TEXT, status TEXT NOT NULL DEFAULT 'open');
                 """
             )
+
+        with self.conn() as db:  # bases creadas antes de añadir estas columnas
+            cols = {r["name"] for r in db.execute("PRAGMA table_info(accounts)")}
+            for col in ("off_since", "purge_warned"):
+                if col not in cols:
+                    db.execute(f"ALTER TABLE accounts ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
 
     @contextlib.contextmanager
     def conn(self):
@@ -329,10 +353,19 @@ class Service:
         acc = self.need_account(uid)
         if not acc["powered"] and not os.path.exists(self.flag_path(acc["username"])):
             return self.me(uid)
-        self.store.run("UPDATE accounts SET powered=0, off_at=0, warned=0 WHERE uid=?", (uid,))
+        self.store.run("UPDATE accounts SET powered=0, off_at=0, warned=0, off_since=?, purge_warned=0 WHERE uid=?",
+                       (int(time.time()), uid))
         self.set_flag(acc["username"], False)
         self.store.log(uid, event, detail)
         return self.me(uid)
+
+    def purge_time(self, acc, plan, now=None):
+        """Cuándo se borrarán los sitios de una cuenta Free apagada (None si no corre peligro)."""
+        if plan != "free" or acc["powered"] or acc["banned"]:
+            return None
+        if not self.store.one("SELECT 1 FROM sites WHERE uid=?", (acc["uid"],)):
+            return None
+        return (acc["off_since"] or acc["created"]) + PURGE_DAYS * DAY
 
     def me(self, uid):
         acc = self.need_account(uid)
@@ -343,6 +376,7 @@ class Service:
         used = acc["used_bytes"]
         remaining = max(0, acc["off_at"] - now) if acc["powered"] and acc["off_at"] else None
         warn = bool(acc["powered"] and acc["off_at"] and p["warn_hours"] and acc["off_at"] - now <= p["warn_hours"] * HOUR)
+        purge_at = self.purge_time(acc, plan, now)
         sites = [
             {"name": s["name"], "bytes": s["bytes"], "files": s["files"], "updated": iso(s["updated"]),
              "url": self.site_url(acc["username"], s["name"])}
@@ -359,7 +393,9 @@ class Service:
             "state": "on" if acc["powered"] else "off", "poweredSince": iso(acc["powered_since"]) if acc["powered"] else None,
             "offAt": iso(acc["off_at"]) if acc["powered"] and acc["off_at"] else None, "secondsLeft": remaining,
             "neverOff": bool(acc["powered"] and not acc["off_at"]),
-            "warning": warn,
+            "warning": warn, "purgeAt": iso(purge_at) if purge_at else None,
+            "purgeWarning": bool(purge_at and purge_at - now <= (PURGE_DAYS - PURGE_WARN_DAYS) * DAY),
+            "badge": PLANS[plan]["badge"], "fileMb": PLANS[plan]["file_mb"], "uploadMb": round(self.upload_limit(plan) / 1024 / 1024),
             "storage": {"used": used, "limit": limit, "percent": round(100 * used / limit, 1) if limit else 0,
                         "warn80": used >= 0.8 * limit, "full": used >= limit},
             "maxSites": p["sites"], "sites": sites, "history": hist,
@@ -409,8 +445,9 @@ class Service:
             raise HttpError(413, "storage_full", limit=limit)
         if length <= 0:
             raise HttpError(400, "empty_body")
-        if length > self.cfg.max_upload:
-            raise HttpError(413, "upload_too_large", max=self.cfg.max_upload)
+        max_upload = self.upload_limit(plan)
+        if length > max_upload:
+            raise HttpError(413, "upload_too_large", max=max_upload)
         tmpdir = tempfile.mkdtemp(prefix=".up-", dir=self.cfg.sites_dir)
         try:
             zpath = os.path.join(tmpdir, "in.zip")
@@ -425,7 +462,7 @@ class Service:
             if got != length:
                 raise HttpError(400, "truncated_upload")
             extracted = os.path.join(tmpdir, "site")
-            nfiles, nbytes = self.extract_zip(zpath, extracted, acc, limit, site)
+            nfiles, nbytes = self.extract_zip(zpath, extracted, acc, limit, site, plan)
             with self._upload_lock:
                 acc = self.need_account(uid)
                 existing = self.store.one("SELECT bytes FROM sites WHERE uid=? AND name=?", (uid, site))
@@ -460,7 +497,15 @@ class Service:
             shutil.rmtree(tmpdir, ignore_errors=True)
         return self.me(uid)
 
-    def extract_zip(self, zpath, dest, acc, limit, site):
+    def upload_limit(self, plan):
+        mb = PLANS[plan]["upload_mb"]
+        return min(self.cfg.max_upload, mb * 1024 * 1024) if mb else self.cfg.max_upload
+
+    def file_limit(self, plan):
+        mb = PLANS[plan]["file_mb"]
+        return mb * 1024 * 1024 if mb else MAX_FILE_BYTES
+
+    def extract_zip(self, zpath, dest, acc, limit, site, plan="free"):
         try:
             zf = zipfile.ZipFile(zpath)
         except zipfile.BadZipFile:
@@ -491,8 +536,8 @@ class Service:
                 ext = os.path.splitext(parts[-1])[1].lower()
                 if ext not in ALLOWED_EXT:
                     raise HttpError(400, "file_type_not_allowed", file=name, ext=ext or "(sin extensión)")
-                if info.file_size > MAX_FILE_BYTES:
-                    raise HttpError(413, "file_too_large", file=name)
+                if info.file_size > self.file_limit(plan):
+                    raise HttpError(413, "file_too_large", file=name, max=self.file_limit(plan))
                 total += info.file_size
                 if total > limit:
                     raise HttpError(413, "storage_full", limit=limit, needed=total)
@@ -521,7 +566,45 @@ class Service:
                 written += size
                 if ext in TEXT_EXT and size <= SCAN_BYTES:
                     self.scan_file(target, rel, ext)
-            return len(plan_files), written
+                if ext in (".html", ".htm") and PLANS[plan]["badge"]:
+                    self.brand_file(target)
+            return len(plan_files), dir_size(dest)
+
+    def brand_file(self, path):
+        """Añade la insignia de Budsin Hosting al final del <body> (una sola vez)."""
+        with open(path, "rb") as fh:
+            data = fh.read()
+        if BADGE_START.encode() in data:
+            return
+        badge = BADGE_HTML.encode()
+        m = BODY_CLOSE_RE.search(data)
+        data = data[: m.start()] + badge + data[m.start():] if m else data + badge
+        with open(path, "wb") as fh:
+            fh.write(data)
+
+    def unbrand_file(self, path):
+        with open(path, "rb") as fh:
+            data = fh.read()
+        new = BADGE_RE.sub(b"", data)
+        if new != data:
+            with open(path, "wb") as fh:
+                fh.write(new)
+
+    def apply_branding(self, uid):
+        """Pone o quita la insignia en todos los .html de la cuenta según su plan actual."""
+        acc = self.account(uid)
+        if not acc:
+            return
+        want = PLANS[self.effective_plan(acc)]["badge"]
+        base = os.path.join(self.cfg.sites_dir, acc["username"])
+        for site in self.store.q("SELECT name FROM sites WHERE uid=?", (uid,)):
+            for root, _dirs, files in os.walk(os.path.join(base, site["name"])):
+                for f in files:
+                    if f.lower().endswith((".html", ".htm")):
+                        path = os.path.join(root, f)
+                        with contextlib.suppress(OSError):
+                            (self.brand_file if want else self.unbrand_file)(path)
+        self.refresh_usage(uid, acc["username"])
 
     def scan_file(self, path, rel, ext):
         with open(path, "rb") as fh:
@@ -562,9 +645,31 @@ class Service:
         for acc in self.store.q("SELECT * FROM accounts WHERE plan!='free' AND plan_until>0 AND plan_until<=?", (now,)):
             self.store.run("UPDATE accounts SET plan='free', plan_until=0 WHERE uid=?", (acc["uid"],))
             self.store.log(acc["uid"], "plan_expired", acc["plan"])
+            self.apply_branding(acc["uid"])
             if acc["powered"] and not acc["off_at"]:
                 self.store.run("UPDATE accounts SET off_at=? WHERE uid=?", (now + PLANS["free"]["hours"] * HOUR, acc["uid"]))
+        self.purge_abandoned(now)
         self.reconcile_flags()
+
+    def purge_abandoned(self, now):
+        for acc in self.store.q("SELECT * FROM accounts WHERE powered=0 AND banned=0"):
+            plan = self.effective_plan(acc, now)
+            at = self.purge_time(acc, plan, now)
+            if not at:
+                continue
+            if now >= at:
+                for s in self.store.q("SELECT name FROM sites WHERE uid=?", (acc["uid"],)):
+                    shutil.rmtree(os.path.join(self.cfg.sites_dir, acc["username"], s["name"]), ignore_errors=True)
+                    self.store.run("DELETE FROM sites WHERE uid=? AND name=?", (acc["uid"], s["name"]))
+                self.refresh_usage(acc["uid"], acc["username"])
+                self.store.log(acc["uid"], "sites_purged", f"apagado más de {PURGE_DAYS} días (plan Free)")
+            elif at - now <= (PURGE_DAYS - PURGE_WARN_DAYS) * DAY and not acc["purge_warned"]:
+                self.store.run("UPDATE accounts SET purge_warned=1 WHERE uid=?", (acc["uid"],))
+                self.store.log(acc["uid"], "purge_warning", f"tus sitios se borrarán el {iso(at)} si no lo enciendes")
+
+    def migrate_branding(self):
+        for acc in self.store.q("SELECT uid FROM accounts"):
+            self.apply_branding(acc["uid"])
 
     def reconcile_flags(self):
         """El archivo-bandera debe existir exactamente para las cuentas encendidas y no vetadas."""
@@ -602,6 +707,7 @@ class Service:
         until = int(time.time()) + int(days) * DAY if plan != "free" else 0
         self.store.run("UPDATE accounts SET plan=?, plan_until=? WHERE uid=?", (plan, until, uid))
         self.store.log(uid, "admin_plan", f"{plan} {days}d por {actor}")
+        self.apply_branding(uid)
         return {"ok": True}
 
     def admin_ban(self, uid, banned, actor):
@@ -690,6 +796,7 @@ class Service:
             if (acc["plan"], acc["plan_until"]) != (best["plan"], best["paid_until"]):
                 self.store.run("UPDATE accounts SET plan=?, plan_until=? WHERE uid=?", (best["plan"], best["paid_until"], uid))
                 self.store.log(uid, "plan_set", f"{best['plan']} hasta {iso(best['paid_until'])}")
+                self.apply_branding(uid)
                 if acc["powered"] and not acc["off_at"] and best["plan"] != "ultra":
                     pass
                 elif acc["powered"] and best["plan"] == "ultra":
@@ -769,11 +876,13 @@ def html_escape(s):
 def plans_payload(svc):
     return {"plans": [
         {"id": pid, "name": PLANS[pid]["name"], "gb": PLANS[pid]["gb"], "hours": PLANS[pid]["hours"],
-         "price": PLANS[pid]["price"], "sites": PLANS[pid]["sites"], "warnHours": PLANS[pid]["warn_hours"]}
+         "price": PLANS[pid]["price"], "sites": PLANS[pid]["sites"], "warnHours": PLANS[pid]["warn_hours"],
+         "fileMb": PLANS[pid]["file_mb"], "uploadMb": svc.upload_limit(pid) // (1024 * 1024), "badge": PLANS[pid]["badge"]}
         for pid in PLAN_ORDER],
         "paypal": {"clientId": svc.cfg.paypal_client, "plans": svc.cfg.paypal_plans, "ready": svc.cfg.paypal_ready(),
                    "sandbox": "sandbox" in svc.cfg.paypal_api},
         "maxUploadMb": round(svc.cfg.max_upload / 1024 / 1024),
+        "purgeDays": PURGE_DAYS, "purgeWarnDays": PURGE_WARN_DAYS,
         "baseDomain": svc.cfg.base_domain}
 
 
@@ -980,6 +1089,7 @@ def main():
     cfg = Config()
     svc = Service(cfg)
     svc.tick()
+    svc.migrate_branding()
     threading.Thread(target=scheduler, args=(svc,), daemon=True).start()
     srv = ThreadingHTTPServer((cfg.host, cfg.port), make_handler(svc))
     sys.stderr.write("budsin-hosting en %s:%d (auth=%s, paypal=%s)\n" % (cfg.host, cfg.port, cfg.auth_ready(), cfg.paypal_ready()))
