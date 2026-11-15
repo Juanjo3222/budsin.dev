@@ -209,5 +209,15 @@ export default {
   "s207": "Unsere <a href=\"/contacto\">Kontaktseite</a>",
   "s208": "E-Mail: budsinjys@gmail.com",
   "s209": "Nutzungsbedingungen · Budsin",
-  "s210": "Nutzungsbedingungen von Budsin — Nutzungsbedingungen für unsere Apps, unsere Website und unser Spieleportal."
+  "s210": "Nutzungsbedingungen von Budsin — Nutzungsbedingungen für unsere Apps, unsere Website und unser Spieleportal.",
+  "hx01": "Budsin Hosting: deine Website unter <strong>deinname.budsin.dev</strong>",
+  "hx02": "Veröffentliche deine statische Website auf deiner eigenen Subdomain, ohne Server einzurichten. Lade eine .zip oder einzelne Dateien hoch, verwalte sie im Dashboard und wähle, wie lange sie eingeschaltet bleibt. Starte kostenlos.",
+  "hx03": "Kostenlos starten",
+  "hx04": "1 GB Speicher, 1 Website und manuelles Einschalten, wann du willst. Keine Karte nötig.",
+  "hx05": "Dateimanager",
+  "hx06": "Lade Dateien hoch, erstelle, benenne um und bearbeite sie im Browser – oder zieh einfach deine HTML-Dateien hinein.",
+  "hx07": "Bezahlpläne",
+  "hx08": "Mehr Speicher und mehr Websites, ohne das Budsin-Hosting-Abzeichen. Zahle mit PayPal und kündige jederzeit.",
+  "hx09": "Pläne ansehen",
+  "hx10": "Meine kostenlose Website erstellen"
 };

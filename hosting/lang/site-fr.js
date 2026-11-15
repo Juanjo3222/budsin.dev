@@ -209,5 +209,15 @@ export default {
   "s207": "Notre <a href=\"/contacto\">page de contact</a>",
   "s208": "E-mail : budsinjys@gmail.com",
   "s209": "Conditions d'utilisation · Budsin",
-  "s210": "Conditions d'utilisation de Budsin — Conditions d'utilisation de nos applications, de notre site web et de notre portail de jeux."
+  "s210": "Conditions d'utilisation de Budsin — Conditions d'utilisation de nos applications, de notre site web et de notre portail de jeux.",
+  "hx01": "Budsin Hosting : votre site sur <strong>votrenom.budsin.dev</strong>",
+  "hx02": "Publiez votre site statique sur votre propre sous-domaine, sans serveur à configurer. Téléversez un .zip ou des fichiers isolés, gérez-les depuis votre tableau de bord et choisissez combien de temps il reste allumé. Commencez gratuitement.",
+  "hx03": "Gratuit pour commencer",
+  "hx04": "1 Go d’espace, 1 site et allumage manuel quand vous voulez. Sans carte bancaire.",
+  "hx05": "Gestionnaire de fichiers",
+  "hx06": "Téléversez, créez, renommez et modifiez des fichiers depuis le navigateur, ou glissez vos fichiers HTML.",
+  "hx07": "Formules payantes",
+  "hx08": "Plus de stockage et plus de sites, sans le badge Budsin Hosting. Payez avec PayPal et annulez quand vous voulez.",
+  "hx09": "Voir les formules",
+  "hx10": "Créer mon site gratuit"
 };

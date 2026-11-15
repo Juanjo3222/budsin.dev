@@ -209,5 +209,15 @@ export default {
   "s207": "Our <a href=\"/contacto\">contact page</a>",
   "s208": "Email: budsinjys@gmail.com",
   "s209": "Terms of Service · Budsin",
-  "s210": "Budsin Terms of Service — Conditions of use for our apps, website and game portal."
+  "s210": "Budsin Terms of Service — Conditions of use for our apps, website and game portal.",
+  "hx01": "Budsin Hosting: your website at <strong>yourname.budsin.dev</strong>",
+  "hx02": "Publish your static site on your own subdomain, with no servers to set up. Upload a .zip or loose files, manage them from your dashboard and choose how long it stays on. Start for free.",
+  "hx03": "Free to start",
+  "hx04": "1 GB of space, 1 site and manual power-on whenever you want. No card needed.",
+  "hx05": "File manager",
+  "hx06": "Upload, create, rename and edit files from your browser, or just drag in your loose HTML files.",
+  "hx07": "Paid plans",
+  "hx08": "More storage and more sites, without the Budsin Hosting badge. Pay with PayPal and cancel anytime.",
+  "hx09": "See plans",
+  "hx10": "Create my free site"
 };

@@ -62,7 +62,7 @@ BADGE_HTML = (
     BADGE_START
     + '<a href="https://budsin.dev/hosting/" target="_blank" rel="noopener" style="position:fixed;right:10px;bottom:10px;'
     'z-index:2147483647;font:600 11px/1 system-ui,sans-serif;color:#fff;background:rgba(10,10,11,.78);padding:7px 10px;'
-    'border-radius:99px;text-decoration:none;letter-spacing:.02em">Hecho con Budsin Hosting</a>'
+    'border-radius:99px;text-decoration:none;letter-spacing:.02em">Hosted by Budsin Hosting</a>'
     + BADGE_END
 )
 BADGE_RE = re.compile(re.escape(BADGE_START).encode() + rb".*?" + re.escape(BADGE_END).encode(), re.S)
