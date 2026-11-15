@@ -29,6 +29,7 @@
   <script type="module">
 import { api, login, logout, onUser, auth, toast, $, esc, bytes, duration, when, explain } from "./hosting.js";
 import { t, reason, paypalLocale, initI18n } from "./i18n.js";
+import { openFiles } from "./files.js";
 
 await initI18n();
 
@@ -137,14 +138,16 @@ function render() {
       <h2>${esc(t("sites.title"))} <span class="h-muted">${esc(t("sites.count", { n: me.sites.length, max: me.maxSites }))}</span></h2>
       <ul class="sites" id="sites">${me.sites.length ? me.sites.map((s) => `<li>
         <span><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a><br><span class="h-muted">${esc(t("sites.meta", { size: bytes(s.bytes), files: s.files, date: when(s.updated) }))}</span></span>
-        <button class="btn btn-danger h-btn-sm" data-del="${esc(s.name)}">${esc(t("sites.delete"))}</button></li>`).join("") : `<li class="h-muted">${esc(t("sites.none"))}</li>`}</ul>
+        <span><button class="btn btn-secondary h-btn-sm" data-files="${esc(s.name)}" data-url="${esc(s.url)}">${esc(t("fm.open"))}</button> <button class="btn btn-danger h-btn-sm" data-del="${esc(s.name)}">${esc(t("sites.delete"))}</button></span></li>`).join("") : `<li class="h-muted">${esc(t("sites.none"))}</li>`}</ul>
       <h2 style="margin-top:20px">${esc(t("up.title"))}</h2>
       <p class="h-muted" style="margin-bottom:10px">${t("up.help.h")} ${esc(t("up.max", { mb: me.uploadMb }) + (me.fileMb ? t("up.maxfile", { mb: me.fileMb }) : "") + ".")}${me.badge ? " " + esc(t("up.badge")) : ""}</p>
       <div class="h-row" style="justify-content:flex-start">
         <input id="site" class="h-input" placeholder="${esc(t("up.name"))}" maxlength="39" style="width:200px">
-        <input id="zip" type="file" accept=".zip,application/zip" class="h-input">
+        <input id="zip" type="file" multiple class="h-input">
         <button class="btn btn-primary" id="up">${esc(t("up.btn"))}</button>
+        <button class="btn btn-secondary" id="mk">${esc(t("fm.createsite"))}</button>
       </div>
+      <p class="h-muted" style="margin-top:10px">${esc(t("fm.note"))}</p>
       <div class="bar" id="prog" style="margin-top:12px;display:none"><i></i></div>
     </div>
 
@@ -170,7 +173,9 @@ function render() {
   document.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
     if (confirm(t("sites.confirm", { name: b.dataset.del }))) act(() => api("/sites/" + b.dataset.del, { method: "DELETE" }));
   });
+  document.querySelectorAll("[data-files]").forEach((b) => b.onclick = () => openFiles(b.dataset.files, b.dataset.url, (r) => { me = r; render(); }));
   $("#up").onclick = upload;
+  $("#mk").onclick = createEmpty;
   $("#out").onclick = (e) => { e.preventDefault(); logout(); };
   $("#rep").onclick = (e) => { e.preventDefault(); report(); };
   renderPlan();
@@ -181,15 +186,33 @@ async function act(fn) {
 }
 async function refresh() { try { me = await api("/me"); render(); } catch (e) {} }
 
+
+const isZip = (f) => /\.zip$/i.test(f.name);
+
 async function upload() {
-  const site = $("#site").value.trim().toLowerCase(), file = $("#zip").files[0];
-  if (!site || !file) return notice("err", t("up.need"));
+  const site = $("#site").value.trim().toLowerCase(), files = [...$("#zip").files];
+  if (!site || !files.length) return notice("err", t("up.need"));
   const prog = $("#prog"), bar = prog.firstElementChild, btn = $("#up");
   prog.style.display = ""; btn.disabled = true; bar.style.width = "0";
   try {
-    me = await api("/sites/" + encodeURIComponent(site) + "/upload", { method: "POST", raw: file, onProgress: (p) => (bar.style.width = Math.round(p * 100) + "%") });
+    if (files.length === 1 && isZip(files[0])) {
+      me = await api("/sites/" + encodeURIComponent(site) + "/upload", { method: "POST", raw: files[0], onProgress: (p) => (bar.style.width = Math.round(p * 100) + "%") });
+    } else {
+      // archivos sueltos: se añaden (o reemplazan) uno a uno en la raíz del sitio, que se crea si hace falta
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        me = await api("/sites/" + encodeURIComponent(site) + "/file?path=" + encodeURIComponent(f.webkitRelativePath || f.name), { method: "PUT", raw: f, rawType: f.type || "application/octet-stream", onProgress: (p) => (bar.style.width = Math.round(((i + p) / files.length) * 100) + "%") });
+      }
+    }
     render(); notice("ok", t("up.done"));
   } catch (e) { notice("err", explain(e)); btn.disabled = false; prog.style.display = "none"; }
+}
+
+async function createEmpty() {
+  const site = $("#site").value.trim().toLowerCase();
+  if (!site) return notice("err", t("up.need"));
+  try { me = await api("/sites/" + encodeURIComponent(site) + "/create", { method: "POST" }); render(); notice("ok", t("fm.created")); }
+  catch (e) { notice("err", explain(e)); }
 }
 
 async function report() {

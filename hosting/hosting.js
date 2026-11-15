@@ -16,14 +16,14 @@ export const login = () => signInWithPopup(auth, new GoogleAuthProvider());
 export const logout = () => signOut(auth);
 export const onUser = (cb) => onAuthStateChanged(auth, cb);
 
-export async function api(path, { method = "GET", body, raw, token = true, onProgress } = {}) {
+export async function api(path, { method = "GET", body, raw, rawType = "application/zip", token = true, onProgress } = {}) {
   const headers = {};
   if (token) {
     if (!auth.currentUser) throw Object.assign(new Error("NO_USER"), { code: "no_user" });
     headers.Authorization = "Bearer " + (await auth.currentUser.getIdToken());
   }
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (raw) headers["Content-Type"] = "application/zip";
+  if (raw) headers["Content-Type"] = rawType;
   const url = `${API}${path}${path.includes("?") ? "&" : "?"}_=${Date.now()}`;
   if (raw && onProgress) {
     // XHR: fetch no informa del progreso de subida
