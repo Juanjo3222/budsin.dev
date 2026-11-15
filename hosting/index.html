@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Budsin Hosting — Alojamiento web estático con planes desde gratis</title>
-  <meta name="description" content="Aloja tu sitio estático en tu propio subdominio de budsin.dev. Planes Free, Plus, Pro y Ultra con 1 a 15 GB de almacenamiento.">
+  <script>(function(){try{var s=localStorage.getItem('budsin_lang');var l=s||((navigator.languages&&navigator.languages[0])||navigator.language||'en').slice(0,2).toLowerCase();if(['es','en','pt','fr','de'].indexOf(l)<0)l='en';if(l!=='es'){document.documentElement.className+=' i18n-pending';setTimeout(function(){document.documentElement.classList.remove('i18n-pending')},3000)}}catch(e){}})()</script>
+  <title data-i18n="title.plans">Budsin Hosting — Alojamiento web estático con planes desde gratis</title>
+  <meta name="description" data-i18n-content="desc.plans" content="Aloja tu sitio estático en tu propio subdominio de budsin.dev. Planes Free, Plus, Pro y Ultra con 1 a 15 GB de almacenamiento.">
   <meta name="robots" content="index, follow">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/hosting/hosting.css">
@@ -16,10 +17,10 @@
       <nav class="nav">
         <a href="/" class="logo">Budsin</a>
         <div class="nav-links">
-          <a href="/hosting/">Hosting</a>
-          <a href="/about">Acerca de</a>
-          <a href="/contacto">Contacto</a>
-          <a href="https://games.budsin.dev" target="_blank" rel="noopener">Juegos</a>
+          <a href="/hosting/" data-i18n="nav.hosting">Hosting</a>
+          <a href="/about" data-i18n="nav.about">Acerca de</a>
+          <a href="/contacto" data-i18n="nav.contact">Contacto</a>
+          <a href="https://games.budsin.dev" target="_blank" rel="noopener" data-i18n="nav.games">Juegos</a>
         </div>
       </nav>
     </div>
@@ -28,95 +29,105 @@
   <main>
     <section class="h-hero">
       <div class="h-wrap">
-        <span class="h-badge">Budsin Hosting</span>
-        <h1>Tu sitio web en tu propio subdominio</h1>
-        <p>Sube tu sitio estático (HTML, CSS, JavaScript e imágenes) en un .zip y publícalo en <strong>tunombre.budsin.dev</strong>. Sin servidores que configurar. Elige cuánto tiempo queda encendido.</p>
-        <a class="btn btn-primary" href="/hosting/panel.html">Empezar gratis</a>
+        <span class="h-badge" data-i18n="hero.badge">Budsin Hosting</span>
+        <h1 data-i18n="hero.title">Tu sitio web en tu propio subdominio</h1>
+        <p data-i18n-html="hero.p.h">Sube tu sitio estático (HTML, CSS, JavaScript e imágenes) en un .zip y publícalo en <strong>tunombre.budsin.dev</strong>. Sin servidores que configurar. Elige cuánto tiempo queda encendido.</p>
+        <a class="btn btn-primary" href="/hosting/panel.html" data-i18n="hero.cta">Empezar gratis</a>
       </div>
     </section>
 
     <section class="section">
       <div class="h-wrap">
-        <h2 class="section-title">Planes</h2>
+        <h2 class="section-title" data-i18n="plans.title">Planes</h2>
         <div class="plans">
           <div class="plan">
             <h3>Free</h3>
-            <div class="price">$0 <small>/ siempre</small></div>
-            <ul><li>1 GB de almacenamiento</li><li>Se apaga a las 12 horas</li><li>Encendido manual cuando quieras</li><li>1 sitio</li><li>Insignia «Hecho con Budsin Hosting»</li></ul>
-            <a class="btn btn-secondary" href="/hosting/panel.html">Crear cuenta</a>
+            <div class="price">$0 <small data-i18n="price.forever">/ siempre</small></div>
+            <ul><li data-i18n="free.1">1 GB de almacenamiento</li><li data-i18n="free.2">Se apaga a las 12 horas</li><li data-i18n="free.3">Encendido manual cuando quieras</li><li data-i18n="free.4">1 sitio</li><li data-i18n="free.5">Insignia «Hecho con Budsin Hosting»</li></ul>
+            <a class="btn btn-secondary" href="/hosting/panel.html" data-i18n="cta.free">Crear cuenta</a>
           </div>
           <div class="plan">
             <h3>Plus</h3>
-            <div class="price">$1.99 <small>/ mes</small></div>
-            <ul><li>5 GB de almacenamiento</li><li>Se apaga a los 5 días</li><li>Encendido manual</li><li>Hasta 10 sitios</li></ul>
-            <a class="btn btn-secondary" href="/hosting/panel.html#planes">Elegir Plus</a>
+            <div class="price">$1.99 <small data-i18n="price.month">/ mes</small></div>
+            <ul><li data-i18n="plus.1">5 GB de almacenamiento</li><li data-i18n="plus.2">Se apaga a los 5 días</li><li data-i18n="plus.3">Encendido manual</li><li data-i18n="plus.4">Hasta 10 sitios</li></ul>
+            <a class="btn btn-secondary" href="/hosting/panel.html#planes" data-i18n="cta.plus">Elegir Plus</a>
+            <p class="pay-other" data-i18n-html="pay.other.h">¿Quieres otro método de pago? Consulta en <a href="mailto:ventasbudsin@budsin.dev" style="color:var(--accent)">ventasbudsin@budsin.dev</a>.</p>
           </div>
           <div class="plan featured">
             <h3>Pro</h3>
-            <div class="price">$3.99 <small>/ mes</small></div>
-            <ul><li>10 GB de almacenamiento</li><li>Se apaga a los 14 días</li><li>Encendido manual</li><li>Hasta 25 sitios</li></ul>
-            <a class="btn btn-primary" href="/hosting/panel.html#planes">Elegir Pro</a>
+            <div class="price">$3.99 <small data-i18n="price.month">/ mes</small></div>
+            <ul><li data-i18n="pro.1">10 GB de almacenamiento</li><li data-i18n="pro.2">Se apaga a los 14 días</li><li data-i18n="pro.3">Encendido manual</li><li data-i18n="pro.4">Hasta 25 sitios</li></ul>
+            <a class="btn btn-primary" href="/hosting/panel.html#planes" data-i18n="cta.pro">Elegir Pro</a>
+            <p class="pay-other" data-i18n-html="pay.other.h">¿Quieres otro método de pago? Consulta en <a href="mailto:ventasbudsin@budsin.dev" style="color:var(--accent)">ventasbudsin@budsin.dev</a>.</p>
           </div>
           <div class="plan">
             <h3>Ultra</h3>
-            <div class="price">$6.99 <small>/ mes</small></div>
-            <ul><li>15 GB de almacenamiento</li><li>Nunca se apaga</li><li>Siempre encendido</li><li>Hasta 50 sitios</li></ul>
-            <a class="btn btn-secondary" href="/hosting/panel.html#planes">Elegir Ultra</a>
+            <div class="price">$6.99 <small data-i18n="price.month">/ mes</small></div>
+            <ul><li data-i18n="ultra.1">15 GB de almacenamiento</li><li data-i18n="ultra.2">Nunca se apaga</li><li data-i18n="ultra.3">Siempre encendido</li><li data-i18n="ultra.4">Hasta 50 sitios</li></ul>
+            <a class="btn btn-secondary" href="/hosting/panel.html#planes" data-i18n="cta.ultra">Elegir Ultra</a>
+            <p class="pay-other" data-i18n-html="pay.other.h">¿Quieres otro método de pago? Consulta en <a href="mailto:ventasbudsin@budsin.dev" style="color:var(--accent)">ventasbudsin@budsin.dev</a>.</p>
           </div>
         </div>
 
-        <h2 class="section-title" style="margin-top:40px">Comparativa</h2>
+        <h2 class="section-title" style="margin-top:40px" data-i18n="cmp.title">Comparativa</h2>
         <div class="h-scroll">
           <table class="h-table">
             <thead><tr><th>&nbsp;</th><th>Free</th><th>Plus</th><th>Pro</th><th>Ultra</th></tr></thead>
             <tbody>
-              <tr><td>Almacenamiento</td><td>1 GB</td><td>5 GB</td><td>10 GB</td><td>15 GB</td></tr>
-              <tr><td>Se apaga</td><td>a las 12 horas</td><td>a los 5 días</td><td>a los 14 días</td><td>nunca</td></tr>
-              <tr><td>Aviso antes de apagarse</td><td>3 horas antes</td><td>1 día antes</td><td>1 día antes</td><td>—</td></tr>
-              <tr><td>Encendido</td><td>manual</td><td>manual</td><td>manual</td><td>siempre encendido</td></tr>
-              <tr><td>Sitios por cuenta</td><td>1</td><td>10</td><td>25</td><td>50</td></tr>
-              <tr><td>Tamaño máximo por archivo</td><td>15 MB</td><td>sin tope extra</td><td>sin tope extra</td><td>sin tope extra</td></tr>
-              <tr><td>Tamaño máximo por subida</td><td>40 MB</td><td>95 MB</td><td>95 MB</td><td>95 MB</td></tr>
-              <tr><td>Insignia «Hecho con Budsin Hosting»</td><td>sí</td><td>no</td><td>no</td><td>no</td></tr>
-              <tr><td>Precio</td><td>$0</td><td>$1.99/mes</td><td>$3.99/mes</td><td>$6.99/mes</td></tr>
+              <tr><td data-i18n="cmp.storage">Almacenamiento</td><td>1 GB</td><td>5 GB</td><td>10 GB</td><td>15 GB</td></tr>
+              <tr><td data-i18n="cmp.off">Se apaga</td><td data-i18n="cmp.off.free">a las 12 horas</td><td data-i18n="cmp.off.plus">a los 5 días</td><td data-i18n="cmp.off.pro">a los 14 días</td><td data-i18n="cmp.off.ultra">nunca</td></tr>
+              <tr><td data-i18n="cmp.warn">Aviso antes de apagarse</td><td data-i18n="cmp.warn.free">3 horas antes</td><td data-i18n="cmp.warn.paid">1 día antes</td><td data-i18n="cmp.warn.paid">1 día antes</td><td>—</td></tr>
+              <tr><td data-i18n="cmp.power">Encendido</td><td data-i18n="cmp.power.manual">manual</td><td data-i18n="cmp.power.manual">manual</td><td data-i18n="cmp.power.manual">manual</td><td data-i18n="cmp.power.always">siempre encendido</td></tr>
+              <tr><td data-i18n="cmp.sites">Sitios por cuenta</td><td>1</td><td>10</td><td>25</td><td>50</td></tr>
+              <tr><td data-i18n="cmp.file">Tamaño máximo por archivo</td><td>15 MB</td><td data-i18n="cmp.noextra">sin tope extra</td><td data-i18n="cmp.noextra">sin tope extra</td><td data-i18n="cmp.noextra">sin tope extra</td></tr>
+              <tr><td data-i18n="cmp.upload">Tamaño máximo por subida</td><td>40 MB</td><td>95 MB</td><td>95 MB</td><td>95 MB</td></tr>
+              <tr><td data-i18n="cmp.badge">Insignia «Hecho con Budsin Hosting»</td><td data-i18n="cmp.yes">sí</td><td data-i18n="cmp.no">no</td><td data-i18n="cmp.no">no</td><td data-i18n="cmp.no">no</td></tr>
+              <tr><td data-i18n="cmp.price">Precio</td><td>$0</td><td>$1.99<span data-i18n="cmp.permonth">/mes</span></td><td>$3.99<span data-i18n="cmp.permonth">/mes</span></td><td>$6.99<span data-i18n="cmp.permonth">/mes</span></td></tr>
             </tbody>
           </table>
         </div>
-        <p class="h-muted">Precios en dólares estadounidenses. Los pagos se hacen con PayPal y se cancelan cuando quieras desde tu panel.</p>
+        <p class="h-muted" data-i18n="pay.note">Precios en dólares estadounidenses. Los pagos se hacen con PayPal y se cancelan cuando quieras desde tu panel.</p>
+        <p class="h-muted" data-i18n-html="pay.other.h">¿Quieres otro método de pago? Consulta en <a href="mailto:ventasbudsin@budsin.dev" style="color:var(--accent)">ventasbudsin@budsin.dev</a>.</p>
       </div>
     </section>
 
     <section class="section section-alt">
       <div class="h-wrap h-faq">
-        <h2 class="section-title">Preguntas frecuentes</h2>
-        <h3>¿Qué significa «apagado»?</h3>
-        <p>Cuando se cumple el tiempo de tu plan, tu subdominio deja de responder. <strong>Tus archivos no se borran.</strong> Entras a tu panel y lo vuelves a encender. Puedes volver a encenderlo cuando quieras, tantas veces como necesites.</p>
-        <h3>¿Cómo es la dirección de mi sitio?</h3>
-        <p>Eliges un nombre al registrarte (por ejemplo <em>maria</em>) y tus sitios quedan en <em>maria.budsin.dev/blog</em>, <em>maria.budsin.dev/portafolio</em>… Todos comparten el almacenamiento de tu plan.</p>
-        <h3>¿Qué puedo subir?</h3>
-        <p>Solo sitios estáticos: HTML, CSS, JavaScript, imágenes, fuentes, audio y vídeo, en un .zip con un <em>index.html</em> en la raíz. No se ejecuta código de servidor (PHP, Node, bases de datos).</p>
-        <h3>¿Qué contenido no se permite?</h3>
-        <p>Consulta las <a href="/hosting/terminos.html" style="color:var(--accent)">normas de uso</a>. Revisamos los nombres y el contenido de forma automática, y podemos apagar cualquier sitio que las incumpla.</p>
-        <h3>¿Hay un límite por subida?</h3>
-        <p>Cada .zip puede pesar hasta 95 MB (40 MB en Free, con un máximo de 15 MB por archivo). Puedes subir varias veces; el límite total es el de tu plan.</p>
-        <h3>¿Qué es la insignia?</h3>
-        <p>Los sitios del plan Free muestran una pequeña etiqueta «Hecho con Budsin Hosting» en una esquina. Desaparece automáticamente al pasar a un plan de pago, sin que tengas que volver a subir nada.</p>
-        <h3>¿Se borra mi sitio si lo dejo apagado?</h3>
-        <p>En los planes de pago, nunca. En el plan Free, si tu sitio lleva <strong>90 días apagados</strong> sin que lo enciendas, se borran sus archivos para liberar espacio (la cuenta se conserva). Te avisamos en tu panel desde el día 60. Enciéndelo una vez y el contador se reinicia.
+        <h2 class="section-title" data-i18n="faq.title">Preguntas frecuentes</h2>
+        <h3 data-i18n="faq.q1">¿Qué significa «apagado»?</h3>
+        <p data-i18n-html="faq.a1.h">Cuando se cumple el tiempo de tu plan, tu subdominio deja de responder. <strong>Tus archivos no se borran.</strong> Entras a tu panel y lo vuelves a encender. Puedes volver a encenderlo cuando quieras, tantas veces como necesites.</p>
+        <h3 data-i18n="faq.q2">¿Cómo es la dirección de mi sitio?</h3>
+        <p data-i18n-html="faq.a2.h">Eliges un nombre al registrarte (por ejemplo <em>maria</em>) y tus sitios quedan en <em>maria.budsin.dev/blog</em>, <em>maria.budsin.dev/portafolio</em>… Todos comparten el almacenamiento de tu plan.</p>
+        <h3 data-i18n="faq.q3">¿Qué puedo subir?</h3>
+        <p data-i18n-html="faq.a3.h">Solo sitios estáticos: HTML, CSS, JavaScript, imágenes, fuentes, audio y vídeo, en un .zip con un <em>index.html</em> en la raíz. No se ejecuta código de servidor (PHP, Node, bases de datos).</p>
+        <h3 data-i18n="faq.q4">¿Qué contenido no se permite?</h3>
+        <p data-i18n-html="faq.a4.h">Consulta las <a href="/hosting/terminos.html" style="color:var(--accent)">normas de uso</a>. Revisamos los nombres y el contenido de forma automática, y podemos apagar cualquier sitio que las incumpla.</p>
+        <h3 data-i18n="faq.q5">¿Hay un límite por subida?</h3>
+        <p data-i18n="faq.a5">Cada .zip puede pesar hasta 95 MB (40 MB en Free, con un máximo de 15 MB por archivo). Puedes subir varias veces; el límite total es el de tu plan.</p>
+        <h3 data-i18n="faq.q6">¿Qué es la insignia?</h3>
+        <p data-i18n="faq.a6">Los sitios del plan Free muestran una pequeña etiqueta «Hecho con Budsin Hosting» en una esquina. Desaparece automáticamente al pasar a un plan de pago, sin que tengas que volver a subir nada.</p>
+        <h3 data-i18n="faq.q7">¿Se borra mi sitio si lo dejo apagado?</h3>
+        <p data-i18n-html="faq.a7.h">En los planes de pago, nunca. En el plan Free, si tu sitio lleva <strong>90 días apagado</strong> sin que lo enciendas, se borran sus archivos para liberar espacio (la cuenta se conserva). Te avisamos en tu panel desde el día 60. Enciéndelo una vez y el contador se reinicia.</p>
+        <h3 data-i18n="faq.q8">¿Puedo pagar de otra forma?</h3>
+        <p data-i18n-html="faq.a8.h">Los pagos automáticos son con PayPal. Si prefieres otro método, escribe a <a href="mailto:ventasbudsin@budsin.dev" style="color:var(--accent)">ventasbudsin@budsin.dev</a>.</p>
       </div>
     </section>
   </main>
   <footer class="footer">
     <div class="container">
       <nav style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px;">
-        <a href="/hosting/" style="color: var(--text-muted); font-size: 0.8125rem;">Hosting</a>
-        <a href="/hosting/terminos.html" style="color: var(--text-muted); font-size: 0.8125rem;">Normas de uso</a>
-        <a href="/privacidad" style="color: var(--text-muted); font-size: 0.8125rem;">Privacidad</a>
-        <a href="/terminos" style="color: var(--text-muted); font-size: 0.8125rem;">Términos</a>
-        <a href="/contacto" style="color: var(--text-muted); font-size: 0.8125rem;">Contacto</a>
+        <a href="/hosting/" style="color: var(--text-muted); font-size: 0.8125rem;" data-i18n="foot.hosting">Hosting</a>
+        <a href="/hosting/terminos.html" style="color: var(--text-muted); font-size: 0.8125rem;" data-i18n="foot.rules">Normas de uso</a>
+        <a href="/privacidad" style="color: var(--text-muted); font-size: 0.8125rem;" data-i18n="foot.privacy">Privacidad</a>
+        <a href="/terminos" style="color: var(--text-muted); font-size: 0.8125rem;" data-i18n="foot.terms">Términos</a>
+        <a href="/contacto" style="color: var(--text-muted); font-size: 0.8125rem;" data-i18n="foot.contact">Contacto</a>
       </nav>
-      <p>&copy; 2026 Budsin. Hecho con dedicación.</p>
+      <p data-i18n="foot.copy">© 2026 Budsin. Hecho con dedicación.</p>
     </div>
   </footer>
+  <script type="module">
+    import { initI18n } from "/hosting/i18n.js";
+    initI18n();
+  </script>
 </body>
 </html>
