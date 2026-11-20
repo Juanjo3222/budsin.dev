@@ -246,5 +246,6 @@ export default {
   "s326": "<strong>Qui peut le voir :</strong> seule l'équipe d'administration peut voir les messages signalés, l'historique des modifications et les données nécessaires à la modération. Personne d'autre ne peut lire vos messages directs.",
   "s327": "<strong>Paiements (Budsin Pro) :</strong> PayPal traite les paiements ; nous ne voyons ni ne conservons les données de votre carte. Nous conservons l'état de l'abonnement et les identifiants nécessaires pour le lier à votre compte.",
   "s329": "<strong>Cloudflare :</strong> Réseau de diffusion et sécurité, y compris des outils de détection de contenus d'abus sexuels sur des enfants.",
-  "s330": "<strong>PayPal :</strong> Traitement des paiements de Budsin Pro."
+  "s330": "<strong>PayPal :</strong> Traitement des paiements de Budsin Pro.",
+  "s331": "<strong>Supprimer votre compte du chat :</strong> vous pouvez le faire vous-même depuis le menu de votre profil, via « Supprimer mon compte du chat ». Votre profil (nom, avatar ou photo et e-mail), vos messages, images, messages vocaux et stickers, vos amis et blocages, et votre place dans les groupes de classe sont effacés immédiatement. Seul ce qui fait l'objet d'un signalement ouvert est conservé, jusqu'à son examen, et une sanction active n'est pas effacée ainsi. Votre compte Google n'est pas modifié."
 };

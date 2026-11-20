@@ -246,5 +246,6 @@ export default {
   "s326": "<strong>Wer es sehen kann:</strong> nur das Administrationsteam kann gemeldete Nachrichten, den Bearbeitungsverlauf und die für die Moderation nötigen Daten einsehen. Niemand sonst kann deine Direktnachrichten lesen.",
   "s327": "<strong>Zahlungen (Budsin Pro):</strong> PayPal wickelt die Zahlungen ab; wir sehen oder speichern deine Kartendaten nicht. Wir speichern den Abonnementstatus und die zur Verknüpfung mit deinem Konto nötigen Kennungen.",
   "s329": "<strong>Cloudflare:</strong> Auslieferungsnetzwerk und Sicherheit, einschließlich Werkzeugen zur Erkennung von Material über sexuellen Kindesmissbrauch.",
-  "s330": "<strong>PayPal:</strong> Abwicklung der Budsin-Pro-Zahlungen."
+  "s330": "<strong>PayPal:</strong> Abwicklung der Budsin-Pro-Zahlungen.",
+  "s331": "<strong>Chat-Konto löschen:</strong> du kannst das selbst im Profilmenü unter „Mein Chat-Konto löschen“ tun. Dein Profil (Name, Avatar oder Foto und E-Mail), deine Nachrichten, Bilder, Sprachnachrichten und Sticker, deine Freunde und Blockierungen sowie dein Platz in Klassengruppen werden sofort gelöscht. Nur was Teil einer offenen Meldung ist, bleibt bis zur Prüfung erhalten, und eine aktive Sanktion wird auf diese Weise nicht gelöscht. Dein Google-Konto bleibt unberührt."
 };

@@ -246,5 +246,6 @@ export default {
   "s326": "<strong>Who can see it:</strong> only the administration team can see reported messages, the edit history and the data needed to moderate. No one else can read your direct messages.",
   "s327": "<strong>Payments (Budsin Pro):</strong> PayPal processes payments; we do not see or store your card data. We store the subscription status and the identifiers needed to link it to your account.",
   "s329": "<strong>Cloudflare:</strong> Delivery network and security, including child sexual abuse material detection tools.",
-  "s330": "<strong>PayPal:</strong> Processing of Budsin Pro payments."
+  "s330": "<strong>PayPal:</strong> Processing of Budsin Pro payments.",
+  "s331": "<strong>Deleting your chat account:</strong> you can do it yourself from your profile menu, under “Delete my chat account”. Your profile (name, avatar or photo and email), messages, images, voice notes and stickers, friends and blocks, and your place in class groups are erased immediately. Only what is part of an open report is kept, until it is reviewed, and an active sanction is not erased this way. Your Google account is not touched."
 };

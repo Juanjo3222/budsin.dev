@@ -246,5 +246,6 @@ export default {
   "s326": "<strong>Quem pode ver:</strong> somente a equipe administradora pode ver as mensagens denunciadas, o histórico de edição e os dados necessários para moderar. Ninguém mais pode ler suas mensagens diretas.",
   "s327": "<strong>Pagamentos (Budsin Pro):</strong> o PayPal processa os pagamentos; não vemos nem guardamos os dados do seu cartão. Guardamos o estado da assinatura e os identificadores necessários para vinculá-la à sua conta.",
   "s329": "<strong>Cloudflare:</strong> Rede de distribuição e segurança, incluindo ferramentas de detecção de material de abuso sexual infantil.",
-  "s330": "<strong>PayPal:</strong> Processamento dos pagamentos do Budsin Pro."
+  "s330": "<strong>PayPal:</strong> Processamento dos pagamentos do Budsin Pro.",
+  "s331": "<strong>Excluir sua conta do chat:</strong> você mesmo pode fazer isso no menu do seu perfil, em “Excluir minha conta do chat”. Seu perfil (nome, avatar ou foto e e-mail), mensagens, imagens, notas de voz e stickers, amigos e bloqueios, e seu lugar nos grupos de turma são apagados imediatamente. Só se mantém o que estiver em uma denúncia aberta, até ser analisada, e uma sanção ativa não é apagada dessa forma. Sua conta Google não é alterada."
 };
